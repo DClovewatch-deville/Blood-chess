@@ -1,0 +1,2969 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>血战模式国际象棋 · 究极易位</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>    <style>
+        :root {
+            --bg: #1a1a2e;
+            --panel-bg: #16213e;
+            --text: #e0e0e0;
+            --accent: #c9a96e;
+            --light-cell: #f0d9b5;
+            --dark-cell: #b58863;
+            --selected: rgba(100, 180, 255, 0.6);
+            --castle-glow: rgba(255, 200, 60, 0.9);
+            --ultimate-glow: rgba(255, 80, 80, 0.9);
+            --board-size: min(80vmin, 520px);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; user-select: none; -webkit-tap-highlight-color: transparent;
+            padding: 10px;
+            overscroll-behavior: none;
+        }
+        .container {
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+            width: 100%; max-width: 600px;
+        }
+        .header h1 {
+            font-size: 1.8em; color: var(--accent);
+            text-shadow: 0 0 20px rgba(201, 169, 110, 0.4);
+            letter-spacing: 2px; text-align: center; margin: 0;
+        }
+        .subtitle { font-size: 0.85em; color: #aaa; text-align: center; margin-top: 4px; }
+        .status-panel {
+            background: var(--panel-bg); border-radius: 12px; padding: 10px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            width: 100%; color: var(--text); border: 1px solid rgba(255,255,255,0.08);
+            flex-wrap: wrap; gap: 8px;
+        }
+        .turn-indicator { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+        .turn-dot {
+            width: 16px; height: 16px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.4); transition: all 0.3s;
+        }
+        .turn-dot.white { background: #fff; box-shadow: 0 0 12px rgba(255,255,255,0.6); }
+        .turn-dot.black { background: #222; box-shadow: 0 0 12px rgba(0,0,0,0.6); border-color: rgba(255,255,255,0.6); }
+        .game-over-badge {
+            background: #e74c3c; color: #fff; padding: 4px 14px;
+            border-radius: 20px; font-weight: 700; font-size: 0.9em;
+        }
+        .board-outer { display: flex; align-items: stretch; justify-content: center; }
+        .rank-labels {
+            display: flex; flex-direction: column; justify-content: space-around;
+            padding-right: 6px; color: #aaa; font-weight: 700;
+            font-size: clamp(12px, 2vmin, 16px); user-select: none;
+        }
+        .board-inner { display: flex; flex-direction: column; position: relative; }
+        .board {
+            display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+            width: var(--board-size); height: var(--board-size);
+            cursor: pointer; border-radius: 4px; overflow: hidden;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 0 2px rgba(201,169,110,0.4);
+        }
+        .file-labels {
+            display: flex; justify-content: space-around; padding-top: 6px;
+            color: #aaa; font-weight: 700; font-size: clamp(12px, 2vmin, 16px); user-select: none;
+        }
+        .cell { position: relative; width: 100%; height: 100%; transition: background-color 0.15s; }
+        .cell.light { background-color: var(--light-cell); }
+        .cell.dark { background-color: var(--dark-cell); }
+        .cell.selected {
+            background-color: var(--selected) !important;
+            box-shadow: inset 0 0 0 4px rgba(80,160,255,0.9); z-index: 2;
+        }
+        .cell .piece {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: calc(var(--board-size) / 10); line-height: 1;
+            pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.3); z-index: 1;
+        }
+        .cell .piece.draggable { pointer-events: auto; cursor: grab; }
+        .highlight-move::after {
+            content: ''; position: absolute; width: 25%; height: 25%;
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            border-radius: 50%; background: rgba(0,0,0,0.3); pointer-events: none; z-index: 1;
+        }
+        .highlight-capture::after {
+            content: ''; position: absolute; width: 80%; height: 80%;
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            border-radius: 50%; border: 5px solid rgba(0,0,0,0.35);
+            pointer-events: none; z-index: 1; box-sizing: border-box;
+        }
+        /* 玩家信息容器（联机时显示） */
+        #playerInfo {
+            padding: 14px; background: var(--panel-bg); border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08); margin-bottom: 10px;
+        }
+        #playerInfo > .player-info:first-child { margin-top: 0; }
+
+        /* 弹幕 */
+        .danmaku-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 20;
+        }
+        .danmaku-item {
+            position: absolute;
+            white-space: nowrap;
+            font-size: 1.0em;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 14px;
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            animation: danmaku-fly 7s linear forwards;
+            top: 20px;
+        }
+        @keyframes danmaku-fly {
+            0%   { transform: translateX(110%); opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { transform: translateX(-110%); opacity: 0; }
+        }
+
+        /* 聊天框 */
+        .chat-box {
+            display: flex; gap: 6px; margin-top: 10px;
+        }
+        .chat-box input {
+            flex: 1; min-width: 0;
+            padding: 6px 10px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 0.85em;
+            outline: none;
+        }
+        .chat-box input:focus { border-color: var(--accent); }
+        .chat-box button {
+            padding: 6px 14px;
+            border-radius: 14px;
+            border: none;
+            background: var(--accent);
+            color: #000;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+        .chat-box button:hover { background: #fff; }
+
+        /* 申请执白按钮 */
+        #btnRequestWhite {
+            margin-top: 8px;
+            padding: 6px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--accent);
+            background: transparent;
+            color: var(--accent);
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.85em;
+            width: 100%;
+        }
+        #btnRequestWhite:hover { background: rgba(201,169,110,0.2); }
+        #btnRequestWhite:disabled { opacity: 0.4; cursor: not-allowed; }
+        @keyframes castle-pulse {
+            0%,100% { box-shadow: inset 0 0 0 6px rgba(255,200,60,0.5); }
+            50% { box-shadow: inset 0 0 0 12px rgba(255,200,60,1); }
+        }
+        .castle-partner.ultimate { animation: ultimate-pulse 0.7s ease-in-out infinite; }
+        @keyframes ultimate-pulse {
+            0%,100% { box-shadow: inset 0 0 0 6px rgba(255,80,80,0.6); }
+            50% { box-shadow: inset 0 0 0 12px rgba(255,80,80,1); }
+        }
+        .castle-partner-icon {
+            position: absolute; bottom: 4px; right: 4px; font-size: 0.55em;
+            color: #c9a96e; font-weight: bold; pointer-events: none; z-index: 4;
+            text-shadow: 0 0 8px #000;
+        }
+        .last-move-from { background-color: rgba(255,255,100,0.4) !important; }
+        .last-move-to { background-color: rgba(255,255,60,0.5) !important; }
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+        .btn {
+            padding: 10px 20px; border-radius: 25px; border: none;
+            font-weight: 600; cursor: pointer; letter-spacing: 1px;
+            transition: all 0.2s; font-size: 0.95em;
+        }
+        .btn-new { background: var(--accent); color: #1a1a2e; }
+        .btn-new:hover { background: #d4b87a; transform: translateY(-2px); }
+        .btn-undo { background: transparent; border: 2px solid rgba(255,255,255,0.3); color: #ccc; }
+        .btn-undo:hover { border-color: #fff; color: #fff; }
+        .btn-mode { background: transparent; border: 2px solid var(--accent); color: var(--accent); font-weight: 700; }
+        .btn-mode.ultimate {
+            background: rgba(255,80,80,0.2); border-color: #e74c3c;
+            color: #e74c3c; box-shadow: 0 0 15px rgba(255,80,80,0.4);
+        }
+        .btn-mode:hover { filter: brightness(1.2); }
+        .btn-rules { background: transparent; border: 2px solid #7f8c8d; color: #bdc3c7; }
+        .btn-rules:hover { border-color: #fff; color: #fff; background: rgba(255,255,255,0.1); }
+        .rules-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.75); display: flex; align-items: center;
+            justify-content: center; z-index: 200; visibility: hidden; opacity: 0;
+            transition: all 0.3s ease;
+        }
+        .rules-overlay.show { visibility: visible; opacity: 1; }
+        .rules-card {
+            background: #1e2a3a; border-radius: 20px; padding: 30px;
+            max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+            border: 1px solid rgba(201,169,110,0.4);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.7); color: var(--text);
+            position: relative; font-size: 0.95em; line-height: 1.7;
+        }
+        .rules-card h2 { color: var(--accent); font-size: 1.6em; margin-bottom: 15px; text-align: center; }
+        .rules-card h3 { color: #f39c12; font-size: 1.2em; margin: 20px 0 8px; border-left: 4px solid var(--accent); padding-left: 10px; }
+        .rules-card p, .rules-card li { margin-bottom: 8px; color: #ddd; }
+        .rules-card ul { margin-left: 20px; }
+        .rules-card .highlight { color: #e74c3c; font-weight: bold; }
+        .rules-close { position: absolute; top: 15px; right: 20px; font-size: 1.8em; color: #aaa; cursor: pointer; background: none; border: none; }
+        .rules-close:hover { color: #fff; }
+        .ultimate-badge { background: rgba(255,80,80,0.2); border:1px solid #e74c3c; color:#e74c3c; padding:2px 8px; border-radius:12px; font-size:0.8em; margin-left:8px; }
+        .promotion-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+        }
+        .promotion-dialog {
+            background: var(--panel-bg); border-radius: 16px; padding: 20px;
+            display: flex; gap: 12px; border: 2px solid var(--accent);
+        }
+        .promotion-option {
+            width: 60px; height: 60px; font-size: 40px; border-radius: 12px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            background: #2a2a3e; color: #fff; border: 2px solid transparent;
+            transition: 0.2s;
+        }
+        .promotion-option:hover { border-color: var(--accent); background: #3a3a50; transform: scale(1.1); }
+
+        /* 联机相关样式 */
+        .online-panel {
+            background: var(--panel-bg); border-radius: 12px; padding: 20px;
+            width: 100%; border: 1px solid rgba(201,169,110,0.4);
+        }
+        .online-panel h3 { color: var(--accent); margin-bottom: 15px; text-align: center; }
+        .online-tabs { display: flex; gap: 10px; margin-bottom: 15px; }
+        .online-tab {
+            flex: 1; padding: 10px; border-radius: 8px; border: 2px solid transparent;
+            background: rgba(255,255,255,0.1); color: var(--text);
+            cursor: pointer; font-weight: 600; transition: all 0.2s;
+        }
+        .online-tab.active { border-color: var(--accent); background: rgba(201,169,110,0.2); }
+        .online-content { text-align: center; }
+        .room-code-display {
+            background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px;
+            margin: 15px 0; font-size: 1.2em; color: var(--accent);
+            font-weight: bold; word-break: break-all; cursor: pointer;
+            border: 1px solid rgba(201,169,110,0.3);
+            user-select: all;
+        }
+        .room-code-display:hover { background: rgba(0,0,0,0.5); }
+        .copy-hint { font-size: 0.8em; color: #888; margin-top: 5px; }
+        .input-group { margin: 10px 0; }
+        .input-group label { display: block; margin-bottom: 5px; color: #aaa; }
+        .input-group input {
+            width: 100%; padding: 12px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.3); color: var(--text); font-size: 1em;
+            text-align: center; font-family: inherit;
+        }
+        .input-group input:focus { outline: none; border-color: var(--accent); }
+        .btn-join { background: #27ae60; color: #fff; width: 100%; margin-top: 10px; }
+        .btn-join:hover { background: #2ecc71; }
+        .btn-create { background: var(--accent); color: #1a1a2e; width: 100%; margin-top: 10px; }
+        .btn-create:hover { background: #d4b87a; }
+        .connection-status {
+            padding: 10px; border-radius: 8px; margin: 10px 0;
+            text-align: center; font-weight: 600;
+        }
+        .status-waiting { background: rgba(241,196,15,0.2); color: #f1c40f; }
+        .status-connected { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .status-error { background: rgba(231,76,60,0.2); color: #e74c3c; }
+        .player-info {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 8px;
+            margin-top: 10px;
+        }
+        .player-label { font-weight: bold; color: var(--accent); }
+        .player-color { padding: 3px 10px; border-radius: 12px; font-size: 0.85em; }
+        .color-white { background: #fff; color: #000; }
+        .color-black { background: #333; color: #fff; border: 1px solid #555; }
+        .disconnect-btn {
+            background: rgba(231,76,60,0.2); border: 2px solid #e74c3c; color: #e74c3c;
+            padding: 8px 16px; border-radius: 20px; cursor: pointer; margin-top: 10px;
+            font-weight: 600; transition: all 0.2s;
+        }
+        .disconnect-btn:hover { background: #e74c3c; color: #fff; }
+        .waiting-dots::after { content: ''; animation: dots 1.5s infinite; }
+        @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+        .game-disabled { opacity: 0.5; pointer-events: none; }
+        .your-turn { color: #2ecc71 !important; }
+        .conn-status {
+            display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: 0.75em; margin-left: 8px; font-weight: 600;
+        }
+        .conn-status.online { background: rgba(46,204,113,0.2); color: #2ecc71; }
+        .conn-status.connecting { background: rgba(241,196,15,0.2); color: #f1c40f; }
+        .conn-status.offline { background: rgba(231,76,60,0.2); color: #e74c3c; }
+        .server-select {
+            display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; justify-content: center;
+        }
+        .server-btn {
+            padding: 6px 12px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05); color: var(--text);
+            cursor: pointer; font-size: 0.8em; transition: all 0.2s;
+        }
+        .server-btn.active { border-color: var(--accent); background: rgba(201,169,110,0.2); color: var(--accent); }
+        .server-btn:hover { filter: brightness(1.2); }
+        .server-label { color: #aaa; font-size: 0.85em; text-align: center; margin: 8px 0 4px; }
+        .advanced-toggle {
+            background: transparent; border: none; color: #888;
+            font-size: 0.8em; cursor: pointer; padding: 4px 8px;
+        }
+        .advanced-toggle:hover { color: var(--accent); }
+        .advanced-panel { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .advanced-panel.show { display: block; }
+        .log-panel {
+            margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.3);
+            border-radius: 8px; max-height: 120px; overflow-y: auto;
+            font-family: monospace; font-size: 0.7em; color: #0f0;
+            text-align: left;
+        }
+        .log-panel div { margin: 1px 0; word-break: break-all; }
+        .log-panel .err { color: #e74c3c; }
+        .log-panel .warn { color: #f39c12; }
+
+        /* 棋谱与子力面板 */
+        .info-panel {
+            background: var(--panel-bg); border-radius: 12px;
+            padding: 14px; width: 100%; border: 1px solid rgba(255,255,255,0.08);
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .info-panel h4 {
+            color: var(--accent); font-size: 1em;
+            margin: 0 0 6px 0; letter-spacing: 1px;
+        }
+        .material-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 6px 10px; background: rgba(0,0,0,0.25); border-radius: 8px;
+            font-size: 0.9em;
+        }
+        .material-label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+        .material-white { color: #fff; }
+        .material-black { color: #ddd; }
+        .material-value { font-weight: 700; color: var(--accent); min-width: 36px; text-align: right; }
+        .material-diff { font-size: 0.85em; color: #aaa; min-width: 60px; text-align: center; }
+        .material-captured { font-size: 0.95em; min-height: 1.4em; letter-spacing: 1px; }
+
+        .pgn-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+        .pgn-btn {
+            padding: 5px 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05); color: var(--text);
+            cursor: pointer; font-size: 0.78em; transition: all 0.15s;
+        }
+        .pgn-btn:hover { background: rgba(201,169,110,0.2); border-color: var(--accent); color: var(--accent); }
+        .pgn-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .pgn-panel {
+            background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px;
+            max-height: 180px; overflow-y: auto; font-size: 0.82em;
+            line-height: 1.7; color: #ccc; font-family: 'Consolas', 'Menlo', monospace;
+            text-align: left;
+        }
+        .pgn-empty { color: #888; text-align: center; padding: 12px; font-size: 0.9em; }
+        .pgn-row { display: flex; gap: 6px; padding: 2px 4px; border-radius: 4px; }
+        .pgn-row:hover { background: rgba(255,255,255,0.04); }
+        .pgn-row.current { background: rgba(201,169,110,0.18); }
+        .pgn-num { color: #888; min-width: 30px; font-weight: 600; }
+        .pgn-white { flex: 1; color: #fff; cursor: pointer; }
+        .pgn-black { flex: 1; color: #bbb; cursor: pointer; }
+        .pgn-white:hover, .pgn-black:hover { color: var(--accent); }
+        .pgn-white.current, .pgn-black.current { color: var(--accent); font-weight: 700; }
+
+        .pgn-export {
+            background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px;
+            font-family: 'Consolas', 'Menlo', monospace; font-size: 0.75em;
+            color: #888; word-break: break-all; white-space: pre-wrap;
+            max-height: 80px; overflow-y: auto; display: none;
+        }
+        .pgn-export.show { display: block; }
+
+        /* 悔棋申请对话框 */
+        .undo-modal {
+            background: var(--panel-bg); border-radius: 16px; padding: 24px;
+            max-width: 380px; width: 90%; text-align: center;
+            border: 2px solid var(--accent);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.7); color: var(--text);
+        }
+        .undo-modal h3 {
+            color: var(--accent); margin-bottom: 12px; font-size: 1.3em;
+        }
+        .undo-modal p { margin: 10px 0; line-height: 1.6; color: #ddd; }
+        .undo-modal .undo-countdown {
+            font-size: 0.85em; color: #888; margin: 8px 0;
+        }
+        .undo-modal .undo-countdown.warn { color: #f39c12; }
+        .undo-modal .undo-countdown.danger { color: #e74c3c; }
+        .undo-modal-buttons {
+            display: flex; gap: 10px; justify-content: center; margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .undo-btn {
+            padding: 10px 22px; border-radius: 22px; border: none;
+            font-weight: 600; cursor: pointer; font-size: 0.95em;
+            transition: all 0.2s; letter-spacing: 1px;
+        }
+        .undo-btn-accept { background: #27ae60; color: #fff; }
+        .undo-btn-accept:hover { background: #2ecc71; transform: translateY(-2px); }
+        .undo-btn-decline { background: transparent; border: 2px solid #e74c3c; color: #e74c3c; }
+        .undo-btn-decline:hover { background: #e74c3c; color: #fff; }
+        .undo-btn-cancel { background: transparent; border: 2px solid rgba(255,255,255,0.3); color: #ccc; }
+        .undo-btn-cancel:hover { border-color: #fff; color: #fff; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>♛ 血战模式国际象棋</h1>
+        <div class="subtitle" id="modeSubtitle">歼灭模式 · 终极易位</div>
+    </div>
+
+    <!-- 联机面板 -->
+    <div class="online-panel" id="onlinePanel">
+        <h3>🎮 联机对战 <span class="conn-status offline" id="connStatus">未连接</span></h3>
+        <div class="online-tabs">
+            <button class="online-tab active" id="tabCreate" onclick="switchTab('create')">创建房间</button>
+            <button class="online-tab" id="tabJoin" onclick="switchTab('join')">加入房间</button>
+        </div>
+        <div class="online-content" id="onlineContent">
+            <!-- 创建房间 -->
+            <div id="createPanel">
+                <p style="color:#aaa;margin-bottom:10px;">创建一个新房间，然后分享邀请码给朋友</p>
+                <button class="btn btn-create" id="btnCreateRoom" onclick="createRoom()">🏠 创建房间</button>
+                <div id="createStatus"></div>
+                <div id="roomCodeDisplay" class="room-code-display" style="display:none;" onclick="copyRoomCode()"></div>
+                <div class="copy-hint" id="copyHint" style="display:none;">点击邀请码复制</div>
+                <div id="waitingStatus" class="connection-status status-waiting" style="display:none;">
+                    等待对方加入<span class="waiting-dots"></span>
+                </div>
+            </div>
+            <!-- 加入房间 -->
+            <div id="joinPanel" style="display:none;">
+                <p style="color:#aaa;margin-bottom:10px;">输入朋友分享的邀请码加入游戏</p>
+                <div class="input-group">
+                    <label>邀请码</label>
+                    <input type="text" id="roomCodeInput" placeholder="输入邀请码..." autocomplete="off" />
+                </div>
+                <button class="btn btn-join" id="btnJoinRoom" onclick="joinRoom()">🚀 加入游戏</button>
+                <div id="joinStatus"></div>
+            </div>
+        </div>
+
+        <!-- 服务器选择 -->
+        <div class="server-label">信令服务器（影响连接成功率，跨网络必备）</div>
+        <div class="server-select">
+            <button class="server-btn active" id="srvDefault" onclick="selectServer('default')">🌐 PeerJS默认</button>
+            <button class="server-btn" id="srvCloudflare" onclick="selectServer('cloudflare')">☁️ Cloudflare</button>
+            <button class="server-btn" id="srvCustom" onclick="toggleCustomServer()">⚙️ 自定义</button>
+        </div>
+        <div class="advanced-panel" id="customServerPanel">
+            <div class="input-group">
+                <label>服务器Host</label>
+                <input type="text" id="customHost" placeholder="例如：peerjs.example.com" />
+            </div>
+            <div class="input-group">
+                <label>端口</label>
+                <input type="number" id="customPort" value="443" />
+            </div>
+            <div class="input-group">
+                <label>路径</label>
+                <input type="text" id="customPath" value="/" />
+            </div>
+            <div class="input-group">
+                <label>
+                    <input type="checkbox" id="customSecure" checked /> 使用HTTPS/WSS
+                </label>
+            </div>
+        </div>
+
+        <!-- 玩家信息容器已移至 statusPanel 下方（避免被 enableGame 隐藏） -->
+
+        <button class="advanced-toggle" onclick="toggleLog()">📋 显示调试日志</button>
+        <div class="log-panel" id="logPanel" style="display:none;"></div>
+    </div>
+
+    <div class="status-panel" id="statusPanel">
+        <div class="turn-indicator">
+            <span class="turn-dot white" id="turnDot"></span>
+            <span id="turnText" class="turn-label">等待连接...</span>
+        </div>
+        <div id="gameOverBadge" class="game-over-badge" style="display:none;"></div>
+    </div>
+
+    <!-- 连接后的玩家信息（放在 statusPanel 下方，联机时显示） -->
+    <div id="playerInfo" style="display:none;">
+        <div class="player-info">
+            <span class="player-label">你</span>
+            <span class="player-color" id="yourColor"></span>
+        </div>
+        <div class="player-info">
+            <span class="player-label">对手</span>
+            <span class="player-color" id="opponentColor"></span>
+        </div>
+        <button id="btnRequestWhite" onclick="requestWhite()" style="display:none;">🎲 申请执白</button>
+        <button class="disconnect-btn" onclick="disconnectGame()">断开连接</button>
+        <!-- 聊天框（联机时） -->
+        <div class="chat-box" id="chatBox">
+            <input type="text" id="chatInput" placeholder="输入弹幕（≤25字）" maxlength="25" onkeydown="if(event.key==='Enter')sendChat()" />
+            <button onclick="sendChat()">发送</button>
+        </div>
+    </div>
+    <div class="board-outer">
+        <div class="rank-labels" id="rankLabels"></div>
+        <div class="board-inner">
+            <div class="board" id="board"></div>
+            <div class="file-labels" id="fileLabels"></div>
+            <!-- 弹幕容器（覆盖在棋盘上方） -->
+            <div class="danmaku-overlay" id="danmakuOverlay"></div>
+        </div>
+    </div>
+    <div class="btn-row">
+        <button class="btn btn-new" onclick="newGame()" id="btnNewGame">🔄 新游戏</button>
+        <button class="btn btn-undo" onclick="undoMove()" id="btnUndo">↩ 悔棋</button>
+        <button class="btn btn-mode" id="btnUltimateMode" onclick="toggleUltimateMode()">⚡ 究极模式</button>
+        <button class="btn btn-rules" onclick="toggleRules()">📖 规则书</button>
+    </div>
+
+    <!-- 子力计算 -->
+    <div class="info-panel">
+        <h4>⚖️ 子力对比</h4>
+        <div class="material-row">
+            <span class="material-label material-white">⬜ 白方</span>
+            <span class="material-value" id="whiteMaterial">0</span>
+            <span class="material-diff" id="whiteCaptured"></span>
+        </div>
+        <div class="material-row">
+            <span class="material-label material-black">⬛ 黑方</span>
+            <span class="material-value" id="blackMaterial">0</span>
+            <span class="material-diff" id="blackCaptured"></span>
+        </div>
+        <div style="text-align:center; color:var(--accent); font-weight:700; font-size:1.05em;" id="materialAdvantage">形势均衡</div>
+    </div>
+
+    <!-- 棋谱记录 -->
+    <div class="info-panel">
+        <h4>📝 棋谱记录</h4>
+        <div class="pgn-controls">
+            <button class="pgn-btn" onclick="goToMove(0)">⏮ 起始</button>
+            <button class="pgn-btn" onclick="goPrevMove()">◀ 上一步</button>
+            <button class="pgn-btn" onclick="goNextMove()">下一步 ▶</button>
+            <button class="pgn-btn" onclick="goToLatest()">⏭ 最新</button>
+            <button class="pgn-btn" onclick="copyPgn()">📋 复制PGN</button>
+            <button class="pgn-btn" onclick="togglePgnExport()">📄 显示PGN</button>
+        </div>
+        <div class="pgn-panel" id="pgnPanel">
+            <div class="pgn-empty">暂无棋谱</div>
+        </div>
+        <div class="pgn-export" id="pgnExport"></div>
+    </div>
+</div>
+
+<div class="rules-overlay" id="rulesOverlay" onclick="if(event.target===this)toggleRules()">
+    <div class="rules-card">
+        <button class="rules-close" onclick="toggleRules()">&times;</button>
+        <h2>📜 血战模式规则书</h2>
+        <p>欢迎来到<strong>血战模式国际象棋</strong>！传统的"将杀"已被废除，取而代之的是更加疯狂的全新规则。</p>
+        <h3>⚔️ 核心胜利条件</h3>
+        <ul>
+            <li><strong>王不可击杀</strong>：<span class="highlight">王永远不会被吃掉</span>，且可作为阻挡单位，防御斜线（后、象）与直线（后、车）的进攻。</li>
+            <li><strong>歼灭胜利</strong>：<span class="highlight">吃掉对方除王以外的所有棋子</span>即获胜，无需将军或杀王。</li>
+            <li><strong>无子可动判负</strong>：如果一方轮走时没有任何合法移动，则直接判负。</li>
+        </ul>
+        <h3>🔄 终极易位（普通模式）</h3>
+        <p>王可以与己方任意棋子进行易位，<strong>不限次数</strong>。规则如下：</p>
+        <ul>
+            <li><strong>共线</strong>：王与伙伴必须位于同一条<strong>车路（横/竖）</strong>或<strong>象路（同色斜线）</strong>上。</li>
+            <li><strong>清空</strong>：两者之间的所有格子必须完全空白。</li>
+            <li><strong>距离</strong>：中间至少空开<strong>两个格子</strong>（即相距≥3格）。</li>
+            <li><strong>移动方式</strong>：采用"取中甩子法"。计算王与伙伴连线的几何中点：
+                <ul>
+                    <li><strong>中点落在格子内</strong>：王移到中点格，伙伴移到紧邻中点另一侧的格子。</li>
+                    <li><strong>中点落在两格边界</strong>：王朝伙伴方向跨边界落至另一侧第一格，伙伴被甩到王新位置旁边的格子。</li>
+                </ul>
+            </li>
+        </ul>
+        <h3>♟️ 兵的特殊规则</h3>
+        <ul>
+            <li><strong>吃过路兵</strong>：完全保留传统规则。</li>
+            <li><strong>升变</strong>：兵到达底线必须立即升变为后、车、象或马，不可不变或变王。</li>
+        </ul>
+        <h3>💀 究极模式 <span class="ultimate-badge">开关切换</span></h3>
+        <p>点击<span style="color:#e74c3c;">「究极模式」</span>按钮后，在原有血战模式基础上增加：</p>
+        <div style="background:rgba(255,80,80,0.1);padding:12px;border-radius:12px;border:1px solid #e74c3c;margin:10px 0;">
+            <span class="highlight">⚡ 王可以与棋盘上<strong>任意棋子</strong>进行终极易位，无论该棋子是己方还是敌方。</span>
+        </div>
+    </div>
+</div>
+
+<div class="promotion-overlay" id="promotionOverlay" style="display:none;">
+    <div class="promotion-dialog" id="promotionDialog"></div>
+</div>
+
+<!-- 悔棋申请对话框 -->
+<div class="promotion-overlay" id="undoOverlay" style="display:none;">
+    <div class="undo-modal" id="undoModal"></div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    const WHITE = 'white', BLACK = 'black';
+    const UNICODE = {
+        'K':'♔','Q':'♕','R':'♖','B':'♗','N':'♘','P':'♙',
+        'k':'♚','q':'♛','r':'♜','b':'♝','n':'♞','p':'♟'
+    };
+    const INITIAL_BOARD = [
+        ['r','n','b','q','k','b','n','r'],
+        ['p','p','p','p','p','p','p','p'],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        ['P','P','P','P','P','P','P','P'],
+        ['R','N','B','Q','K','B','N','R']
+    ];
+
+    // 状态变量
+    let board, currentTurn, selectedRow, selectedCol;
+    let legalMoves, castlePartners, lastMoveInfo;
+    let gameOver, gameOverMessage, capturedByWhite, capturedByBlack;
+    let enPassantTarget, promotionPending;
+    let ultimateMode = false;
+
+    // 棋谱相关
+    // moveHistory[i] = {
+    //     saved: { board, turn, ep, cw, cb, lmi },  // 撤销用（步前状态）
+    //     move: { fr, fc, tr, tc, piece, capturedPiece, isCastle, isPromotion,
+    //             promoChoice, partnerRow, partnerCol },  // 走法描述
+    //     notation: 'e4'                            // PGN 字符串
+    // }
+    let moveHistory = [];
+    let pgnNotation = []; // 简化 PGN，每步一个字符串
+    let viewStep = -1;    // 当前查看的步数（-1 = 最新局面；用于「跳转到指定步」）
+    let isViewingHistory = false; // 是否正在查看历史（不是最新局面）
+
+    // 悔棋申请状态
+    // pendingUndo = null | {
+    //     id: number,           // 申请唯一 ID
+    //     side: 'proposer' | 'responder',  // 当前端身份
+    //     expiresAt: number     // 超时时间戳
+    // }
+    let pendingUndo = null;
+    let undoRequestId = 0;
+    let undoTimer = null;
+
+    // 执白请求状态（仅联机时使用）
+    // 客户端发起 / 房主响应需对方 同意/拒绝 才能完成
+    let pendingWhiteRequest = null; // { requestId, side: 'requester'|'responder', expiresAt }
+    let whiteRequestTimer = null;
+    let whiteRequestId = 0;
+
+    // 联机变量
+    let peer = null;
+    let connection = null;
+    let myColor = null;
+    let isHost = false;
+    let isConnected = false;
+    let reconnectAttempts = 0;
+    let connectTimeout = null;
+    let currentRoomCode = null;
+
+    // ====== PeerJS 服务器配置 ======
+    // 国内可用 STUN 服务器列表（WebRTC 用于 NAT 穿透）
+    const ICE_SERVERS = [
+        { urls: 'stun:stun.qq.com:3478' },
+        { urls: 'stun:stun.aliyun.com:3478' },
+        { urls: 'stun:stun.miwifi.com:3478' },
+        { urls: 'stun:stun.chat.bilibili.com:3478' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun.l.google.com:19302' }
+    ];
+
+    // 信令服务器配置（必须先连上信令服务器，才能交换WebRTC连接信息）
+    const PEER_SERVERS = {
+        default: null, // 使用 PeerJS 默认（0.peerjs.com）
+        cloudflare: {
+            host: 'peerjs.metered.live',
+            port: 443,
+            path: '/',
+            secure: true,
+            iceServers: ICE_SERVERS
+        }
+    };
+
+    let selectedServerKey = 'default';
+
+    // 从 localStorage 恢复用户偏好
+    function loadServerPrefs() {
+        try {
+            const saved = localStorage.getItem('bloodchess_server');
+            if (saved) {
+                const cfg = JSON.parse(saved);
+                if (cfg && cfg.key) {
+                    selectedServerKey = cfg.key;
+                    if (cfg.key === 'custom' && cfg.custom) {
+                        PEER_SERVERS.custom = cfg.custom;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    function saveServerPrefs() {
+        try {
+            const data = { key: selectedServerKey };
+            if (selectedServerKey === 'custom') {
+                data.custom = {
+                    host: document.getElementById('customHost').value.trim(),
+                    port: parseInt(document.getElementById('customPort').value) || 443,
+                    path: document.getElementById('customPath').value || '/',
+                    secure: document.getElementById('customSecure').checked,
+                    iceServers: ICE_SERVERS
+                };
+            }
+            localStorage.setItem('bloodchess_server', JSON.stringify(data));
+        } catch (e) {}
+    }
+
+    function applyServerUI() {
+        document.querySelectorAll('.server-btn').forEach(b => b.classList.remove('active'));
+        const btn = document.getElementById('srv' + selectedServerKey.charAt(0).toUpperCase() + selectedServerKey.slice(1));
+        if (btn) btn.classList.add('active');
+
+        const panel = document.getElementById('customServerPanel');
+        if (selectedServerKey === 'custom') {
+            panel.classList.add('show');
+            const saved = PEER_SERVERS.custom;
+            if (saved) {
+                document.getElementById('customHost').value = saved.host || '';
+                document.getElementById('customPort').value = saved.port || 443;
+                document.getElementById('customPath').value = saved.path || '/';
+                document.getElementById('customSecure').checked = saved.secure !== false;
+            }
+        } else {
+            panel.classList.remove('show');
+        }
+    }
+
+    function selectServer(key) {
+        selectedServerKey = key;
+        if (key === 'custom') {
+            PEER_SERVERS.custom = {
+                host: document.getElementById('customHost').value.trim(),
+                port: parseInt(document.getElementById('customPort').value) || 443,
+                path: document.getElementById('customPath').value || '/',
+                secure: document.getElementById('customSecure').checked,
+                iceServers: ICE_SERVERS
+            };
+            const host = PEER_SERVERS.custom.host;
+            if (!host) {
+                log('请填写自定义服务器地址', 'warn');
+                return;
+            }
+        }
+        saveServerPrefs();
+        applyServerUI();
+        log('已选择信令服务器: ' + key);
+    }
+
+    function toggleCustomServer() {
+        selectServer('custom');
+    }
+
+    function toggleLog() {
+        const panel = document.getElementById('logPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function getServerConfig() {
+        if (selectedServerKey === 'custom') {
+            // 实时读取表单
+            return {
+                host: document.getElementById('customHost').value.trim() || 'peerjs.example.com',
+                port: parseInt(document.getElementById('customPort').value) || 443,
+                path: document.getElementById('customPath').value || '/',
+                secure: document.getElementById('customSecure').checked,
+                iceServers: ICE_SERVERS
+            };
+        }
+        return PEER_SERVERS[selectedServerKey] || null;
+    }
+
+    // 工具
+    function cloneBoard(b) { return b.map(r => r.slice()); }
+    function pieceColor(p) { return p ? (p===p.toUpperCase() ? WHITE : BLACK) : null; }
+    function inBounds(r,c) { return r>=0 && r<8 && c>=0 && c<8; }
+
+    // 坐标辅助：行 0-7、列 0-7 转 PGN 坐标（a1 在 [7][0]）
+    function coordToSq(r, c) {
+        if (!inBounds(r, c)) return '';
+        return String.fromCharCode(97 + c) + (8 - r);
+    }
+    function sqToCoord(sq) {
+        if (!sq || sq.length !== 2) return null;
+        const c = sq.charCodeAt(0) - 97;
+        const r = 8 - parseInt(sq[1], 10);
+        if (!inBounds(r, c)) return null;
+        return { row: r, col: c };
+    }
+
+    // 棋子中文/PGN字母映射
+    const PIECE_PGN = { 'K':'K','Q':'Q','R':'R','B':'B','N':'N','P':'' };
+    function pieceLetter(p) { return PIECE_PGN[(p || '').toUpperCase()] || ''; }
+
+    // 子力价值（标准）
+    const PIECE_VALUE = { 'Q': 9, 'R': 5, 'B': 3, 'N': 3, 'P': 1, 'K': 0 };
+    function pieceValue(p) { return p ? (PIECE_VALUE[p.toUpperCase()] || 0) : 0; }
+
+    // 王不可击杀：是/否
+    const KING_IMMORTAL = true;
+
+    // 完整局面的子力（含王）
+    function calcMaterial(brd) {
+        let w = 0, b = 0;
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = brd[r][c];
+                if (!p) continue;
+                const v = pieceValue(p);
+                if (p === p.toUpperCase()) w += v;
+                else b += v;
+            }
+        }
+        return { white: w, black: b };
+    }
+
+    // 已经被吃的子（按颜色）— 转成 unicode 显示字符串
+    function capturedDisplay(capArr) {
+        // 按价值从大到小排序，后吃的在左
+        const order = { 'Q':5, 'R':4, 'B':3, 'N':2, 'P':1 };
+        const sorted = capArr.slice().sort((a, b) => (order[b.toUpperCase()] || 0) - (order[a.toUpperCase()] || 0));
+        return sorted.map(p => UNICODE[p] || '').join(' ');
+    }
+
+    // ====== PGN 记谱（标准 PGN + 血战易位扩展）======
+    // 标准 PGN：
+    //   普通走子：[piece][(file if pawn capture)][x][destination][=promotion]
+    //   马 f3：Nf3；马吃 e2：Nxe2；兵吃 e4d5：exd5；兵前进 e4：e4
+    //   升变：e7e8=Q（注意：兵升变必须带 from-to）
+    //   终极易位：C-Ke1-c5（王从e1，伙伴c5，血战模式扩展）
+    function formatMoveNotation(move) {
+        if (!move) return '';
+        if (move.isCastle) {
+            // 终极易位：起点王格-伙伴格
+            const kSq = coordToSq(move.fr, move.fc);
+            const pSq = coordToSq(move.partnerRow, move.partnerCol);
+            return 'C-K' + kSq + '-' + pSq;
+        }
+        const fromSq = coordToSq(move.fr, move.fc);
+        const toSq = coordToSq(move.tr, move.tc);
+        const piece = move.piece;
+        const letter = pieceLetter(piece);
+        const isPawn = !letter;
+        let s = '';
+        if (isPawn) {
+            // 兵：吃子要带起始文件（如 exd5），不吃子只写终点（如 e4）
+            if (move.isPromotion) {
+                // 兵升变：必须带 from-to 以避免歧义
+                s = fromSq + (move.capturedPiece ? 'x' : '-') + toSq;
+            } else if (move.capturedPiece) {
+                s = String.fromCharCode(97 + move.fc) + 'x' + toSq;
+            } else {
+                s = toSq;
+            }
+        } else {
+            // 王/后/车/象/马：[piece][x?][destination]
+            s = letter + (move.capturedPiece ? 'x' : '') + toSq;
+        }
+        if (move.isPromotion && move.promoChoice) {
+            s += '=' + pieceLetter(move.promoChoice);
+        }
+        return s;
+    }
+
+    // 走棋后追加棋谱记录
+    function recordMove(move, notation) {
+        const saved = {
+            board: cloneBoard(board),
+            turn: currentTurn, // 走棋前的回合
+            ep: enPassantTarget ? { ...enPassantTarget } : null,
+            cw: [...capturedByWhite],
+            cb: [...capturedByBlack],
+            lmi: lastMoveInfo ? { ...lastMoveInfo } : null
+        };
+        moveHistory.push({ saved, move, notation });
+        pgnNotation.push(notation);
+        viewStep = moveHistory.length; // 默认看最新
+        isViewingHistory = false;
+    }
+
+    // 撤销最后一步（悔棋）
+    function undoLastMove() {
+        if (!moveHistory.length) return false;
+        const entry = moveHistory.pop();
+
+        // 处理 init 同步进来的项（saved 为 null）：必须重建
+        if (!entry.saved) {
+            pgnNotation.pop();
+            rebuildToStep(moveHistory.length);
+            viewStep = moveHistory.length;
+            isViewingHistory = false;
+            gameOver = false;
+            gameOverMessage = '';
+            clearSelection();
+            renderAll();
+            return true;
+        }
+
+        board = entry.saved.board;
+        currentTurn = entry.saved.turn;
+        enPassantTarget = entry.saved.ep;
+        capturedByWhite = entry.saved.cw;
+        capturedByBlack = entry.saved.cb;
+        lastMoveInfo = entry.saved.lmi;
+        gameOver = false;
+        gameOverMessage = '';
+        pgnNotation.pop();
+        clearSelection();
+        viewStep = moveHistory.length;
+        isViewingHistory = false;
+        renderAll();
+        return true;
+    }
+
+    // ===== 跳转到指定步（不影响实际历史） =====
+    // stepIdx: -1 表示最新；0 表示起始；N 表示走完第 N 步后的局面
+    // 调用方可指定 skipRender=true 避免重复渲染
+    function goToMove(stepIdx, skipRender) {
+        if (moveHistory.length === 0) {
+            // 没有历史，回到初始
+            board = cloneBoard(INITIAL_BOARD);
+            currentTurn = WHITE;
+            capturedByWhite = [];
+            capturedByBlack = [];
+            enPassantTarget = null;
+            lastMoveInfo = null;
+            gameOver = false;
+            viewStep = -1;
+            isViewingHistory = false;
+            clearSelection();
+            if (!skipRender) { renderAll(); renderInfoPanels(); }
+            return;
+        }
+        // -1 → 最新（已经走完所有步）
+        if (stepIdx < 0) stepIdx = moveHistory.length;
+        if (stepIdx > moveHistory.length) stepIdx = moveHistory.length;
+        rebuildToStep(stepIdx);
+        isViewingHistory = stepIdx < moveHistory.length;
+        viewStep = stepIdx;
+        clearSelection();
+        if (!skipRender) { renderAll(); renderInfoPanels(); updatePgnHighlight(); }
+    }
+
+    // 从初始重新执行到第 stepIdx 步
+    function rebuildToStep(stepIdx) {
+        board = cloneBoard(INITIAL_BOARD);
+        currentTurn = WHITE;
+        capturedByWhite = [];
+        capturedByBlack = [];
+        enPassantTarget = null;
+        lastMoveInfo = null;
+        gameOver = false;
+        gameOverMessage = '';
+        promotionPending = null;
+
+        for (let i = 0; i < stepIdx && i < moveHistory.length; i++) {
+            const entry = moveHistory[i];
+            const m = entry.move;
+            const mover = pieceColor(board[m.fr][m.fc]); // 走子方
+            if (m.isCastle) {
+                executeMoveNoRecord(m.fr, m.fc, -1, -1, true, m.partnerRow, m.partnerCol);
+            } else {
+                executeMoveNoRecord(m.fr, m.fc, m.tr, m.tc, false, -1, -1, !!m.isEnPassant);
+                if (m.isPromotion && m.promoChoice) {
+                    const promo = mover === WHITE ? m.promoChoice : m.promoChoice.toLowerCase();
+                    board[m.tr][m.tc] = promo;
+                }
+            }
+            currentTurn = currentTurn === WHITE ? BLACK : WHITE;
+        }
+    }
+
+    // 不动 history、只改 board 的 execute（用于回放）
+    // 不切换 currentTurn，由调用方处理
+    function executeMoveNoRecord(fr, fc, tr, tc, isCastle, pr, pc, isEnPassant) {
+        const piece = board[fr][fc];
+        let captured = null;
+        if (isCastle) {
+            const res = calcCastleResult(fr, fc, pr, pc);
+            const partner = board[pr][pc];
+            board[fr][fc] = null;
+            board[pr][pc] = null;
+            board[res.nkr][res.nkc] = piece;
+            board[res.npr][res.npc] = partner;
+            lastMoveInfo = { fromRow: fr, fromCol: fc, toRow: res.nkr, toCol: res.nkc, piece, capturedPiece: null, isCastle: true };
+        } else {
+            captured = board[tr][tc];
+            // 防御：王不可击杀。如果目标格是对方王，强制转为"阻挡"（不进入王的格子）
+            if (KING_IMMORTAL && captured && captured.toUpperCase() === 'K' && pieceColor(captured) !== pieceColor(piece)) {
+                // 该移动不应发生（getPseudoMoves 已过滤），但作为防御，直接拒绝
+                log('防御性阻止：王不可击杀', 'warn');
+                return false;
+            }
+            board[tr][tc] = piece;
+            board[fr][fc] = null;
+            lastMoveInfo = { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc, piece: board[tr][tc], capturedPiece: captured, isCastle: false };
+            if (isEnPassant) {
+                // 吃过路兵：被吃的子在 (fr, tc)，需要清空
+                const epCap = board[fr][tc];
+                if (KING_IMMORTAL && epCap && epCap.toUpperCase() === 'K') {
+                    // 极端边界：吃过路兵对象是王，防御
+                    log('防御性阻止：王不可击杀（EP）', 'warn');
+                    // 回滚
+                    board[tr][tc] = captured;
+                    board[fr][fc] = piece;
+                    return false;
+                }
+                captured = epCap;
+                board[fr][tc] = null;
+                lastMoveInfo.capturedPiece = captured;
+                lastMoveInfo.isEnPassant = true;
+            }
+            if (piece && piece.toUpperCase() === 'P' && Math.abs(tr - fr) === 2) enPassantTarget = { row: (fr + tr) / 2, col: fc };
+            else enPassantTarget = null;
+        }
+        if (captured) {
+            if (pieceColor(piece) === WHITE) capturedByWhite.push(captured);
+            else capturedByBlack.push(captured);
+        }
+        return true;
+    }
+
+    function log(msg, type = 'info') {
+        const prefix = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : 'ℹ️';
+        const tstr = new Date().toLocaleTimeString();
+        console.log(prefix, msg);
+
+        const panel = document.getElementById('logPanel');
+        if (panel) {
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = '[' + tstr + '] ' + prefix + ' ' + msg;
+            panel.appendChild(line);
+            // 只保留最近 50 条
+            while (panel.children.length > 50) {
+                panel.removeChild(panel.firstChild);
+            }
+            panel.scrollTop = panel.scrollHeight;
+        }
+    }
+
+    function updateConnStatus(state, text) {
+        const el = document.getElementById('connStatus');
+        if (!el) return;
+        el.className = 'conn-status ' + state;
+        el.textContent = text;
+    }
+
+    // ===== 复制（兼容非安全上下文）=====
+    function fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        let ok = false;
+        try {
+            ok = document.execCommand('copy');
+        } catch (e) {
+            ok = false;
+        }
+        document.body.removeChild(textarea);
+        return ok;
+    }
+
+    function copyText(text) {
+        // 优先用现代API，失败则降级
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).then(() => true).catch(() => fallbackCopy(text));
+        }
+        return Promise.resolve(fallbackCopy(text));
+    }
+
+    // ===== 联机功能 =====
+    function switchTab(tab) {
+        document.getElementById('tabCreate').classList.toggle('active', tab === 'create');
+        document.getElementById('tabJoin').classList.toggle('active', tab === 'join');
+        document.getElementById('createPanel').style.display = tab === 'create' ? 'block' : 'none';
+        document.getElementById('joinPanel').style.display = tab === 'join' ? 'block' : 'none';
+        document.getElementById('joinStatus').innerHTML = '';
+    }
+
+    function generateRoomCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+    }
+
+    function setBusy(panel, busy) {
+        if (panel === 'create') {
+            const btn = document.getElementById('btnCreateRoom');
+            if (btn) btn.disabled = busy;
+        } else if (panel === 'join') {
+            const btn = document.getElementById('btnJoinRoom');
+            if (btn) btn.disabled = busy;
+        }
+    }
+
+    function clearAllTimers() {
+        if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
+    }
+
+    function destroyPeer() {
+        clearAllTimers();
+        if (connection) {
+            try { connection.close(); } catch (e) {}
+            connection = null;
+        }
+        if (peer) {
+            try { peer.destroy(); } catch (e) {}
+            peer = null;
+        }
+    }
+
+    function createRoom() {
+        const statusDiv = document.getElementById('createStatus');
+        statusDiv.innerHTML = '<div class="connection-status status-waiting">正在初始化...</div>';
+        setBusy('create', true);
+        updateConnStatus('connecting', '连接中');
+
+        destroyPeer();
+
+        const roomCode = generateRoomCode();
+        currentRoomCode = roomCode;
+
+        try {
+            const opts = {
+                debug: 2,
+                config: { iceServers: ICE_SERVERS }
+            };
+            const srvCfg = getServerConfig();
+            if (srvCfg) {
+                opts.host = srvCfg.host;
+                opts.port = srvCfg.port;
+                opts.path = srvCfg.path;
+                opts.secure = srvCfg.secure;
+                if (srvCfg.iceServers) opts.config.iceServers = srvCfg.iceServers;
+                log('使用信令服务器: ' + srvCfg.host + ':' + srvCfg.port);
+            } else {
+                log('使用 PeerJS 默认服务器 (0.peerjs.com)');
+            }
+            peer = new Peer('bloodchess-' + roomCode, opts);
+        } catch (e) {
+            statusDiv.innerHTML = '<div class="connection-status status-error">初始化失败: ' + e.message + '</div>';
+            setBusy('create', false);
+            updateConnStatus('offline', '失败');
+            return;
+        }
+
+        // 初始化超时
+        connectTimeout = setTimeout(() => {
+            if (!peer || !peer.open) {
+                statusDiv.innerHTML = '<div class="connection-status status-error">连接超时，请检查网络后重试</div>';
+                setBusy('create', false);
+                updateConnStatus('offline', '超时');
+                destroyPeer();
+            }
+        }, 15000);
+
+        peer.on('open', (id) => {
+            clearAllTimers();
+            isHost = true;
+            log('房间创建成功: ' + roomCode);
+            document.getElementById('roomCodeDisplay').textContent = roomCode;
+            document.getElementById('roomCodeDisplay').style.display = 'block';
+            document.getElementById('copyHint').style.display = 'block';
+            document.getElementById('waitingStatus').style.display = 'block';
+            statusDiv.innerHTML = '';
+            setBusy('create', false);
+            updateConnStatus('connecting', '等待对手');
+
+            // 更新URL
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomCode);
+                window.history.replaceState({}, '', url.toString());
+            } catch (e) {}
+        });
+
+        peer.on('connection', (conn) => {
+            log('收到连接请求: ' + conn.peer);
+            if (connection && connection.open) {
+                log('已有连接，拒绝新连接');
+                conn.close();
+                return;
+            }
+            connection = conn;
+            setupConnection();
+        });
+
+        peer.on('error', (err) => {
+            log('Peer错误: ' + err.type, 'error');
+            clearAllTimers();
+            setBusy('create', false);
+            updateConnStatus('offline', '错误');
+
+            if (err.type === 'unavailable-id') {
+                log('房间ID冲突，重试...');
+                statusDiv.innerHTML = '<div class="connection-status status-waiting">房间ID冲突，自动重试...</div>';
+                setTimeout(createRoom, 500);
+            } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+                statusDiv.innerHTML = '<div class="connection-status status-error">网络错误，请重试</div>';
+                destroyPeer();
+            } else if (err.type === 'peer-unavailable') {
+                // 加入房间时对方不存在
+                statusDiv.innerHTML = '<div class="connection-status status-error">房间不存在或已关闭</div>';
+                destroyPeer();
+            } else {
+                statusDiv.innerHTML = '<div class="connection-status status-error">错误: ' + err.type + '</div>';
+            }
+        });
+
+        peer.on('disconnected', () => {
+            log('Peer与服务器断开');
+            updateConnStatus('connecting', '重连中');
+            // 尝试重连
+            if (peer && !peer.destroyed) {
+                setTimeout(() => {
+                    if (peer && !peer.destroyed) {
+                        peer.reconnect();
+                    }
+                }, 1000);
+            }
+        });
+    }
+
+    function joinRoom() {
+        const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+        const statusDiv = document.getElementById('joinStatus');
+
+        if (!roomCode) {
+            statusDiv.innerHTML = '<div class="connection-status status-error">请输入邀请码</div>';
+            return;
+        }
+        if (roomCode.length !== 6) {
+            statusDiv.innerHTML = '<div class="connection-status status-error">邀请码必须是6位字符</div>';
+            return;
+        }
+
+        statusDiv.innerHTML = '<div class="connection-status status-waiting">正在连接...</div>';
+        setBusy('join', true);
+        updateConnStatus('connecting', '连接中');
+
+        destroyPeer();
+        currentRoomCode = roomCode;
+
+        try {
+            const opts = {
+                debug: 2,
+                config: { iceServers: ICE_SERVERS }
+            };
+            const srvCfg = getServerConfig();
+            if (srvCfg) {
+                opts.host = srvCfg.host;
+                opts.port = srvCfg.port;
+                opts.path = srvCfg.path;
+                opts.secure = srvCfg.secure;
+                if (srvCfg.iceServers) opts.config.iceServers = srvCfg.iceServers;
+                log('使用信令服务器: ' + srvCfg.host + ':' + srvCfg.port);
+            } else {
+                log('使用 PeerJS 默认服务器 (0.peerjs.com)');
+            }
+            peer = new Peer(undefined, opts);
+        } catch (e) {
+            statusDiv.innerHTML = '<div class="connection-status status-error">初始化失败: ' + e.message + '</div>';
+            setBusy('join', false);
+            updateConnStatus('offline', '失败');
+            return;
+        }
+
+        // 初始化超时
+        connectTimeout = setTimeout(() => {
+            if (!peer || !peer.open) {
+                statusDiv.innerHTML = '<div class="connection-status status-error">连接超时，请检查网络</div>';
+                setBusy('join', false);
+                updateConnStatus('offline', '超时');
+                destroyPeer();
+            }
+        }, 15000);
+
+        peer.on('open', () => {
+            clearAllTimers();
+            log('Peer就绪，连接到房间: ' + roomCode);
+            updateConnStatus('connecting', '连接房间');
+
+            // 关键修复：先建立连接并设置好监听器
+            connection = peer.connect('bloodchess-' + roomCode, {
+                reliable: true,
+                serialization: 'json'
+            });
+            setupConnection();
+        });
+
+        peer.on('error', (err) => {
+            log('Peer错误: ' + err.type, 'error');
+            clearAllTimers();
+            setBusy('join', false);
+            destroyPeer();
+            updateConnStatus('offline', '错误');
+
+            if (err.type === 'peer-unavailable') {
+                statusDiv.innerHTML = '<div class="connection-status status-error">房间不存在或已关闭，请确认邀请码</div>';
+            } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+                statusDiv.innerHTML = '<div class="connection-status status-error">网络错误，请检查后重试</div>';
+            } else {
+                statusDiv.innerHTML = '<div class="connection-status status-error">连接失败: ' + err.type + '</div>';
+            }
+        });
+
+        peer.on('disconnected', () => {
+            log('Peer与服务器断开');
+            updateConnStatus('connecting', '重连中');
+            if (peer && !peer.destroyed) {
+                setTimeout(() => {
+                    if (peer && !peer.destroyed) peer.reconnect();
+                }, 1000);
+            }
+        });
+    }
+
+    // 设置连接的监听器（无论房主还是加入方都调用）
+    function setupConnection() {
+        if (!connection) return;
+
+        log('设置连接监听器');
+
+        connection.on('open', () => {
+            log('✅ 连接已打开');
+            isConnected = true;
+            reconnectAttempts = 0;
+            clearAllTimers();
+
+            document.getElementById('waitingStatus').style.display = 'none';
+            document.getElementById('joinStatus').innerHTML = '<div class="connection-status status-connected">✅ 连接成功！</div>';
+            updateConnStatus('online', '已连接');
+
+            if (isHost) {
+                myColor = WHITE;
+                sendMessage({
+                    type: 'init',
+                    color: WHITE,
+                    board: cloneBoard(board),
+                    currentTurn: currentTurn,
+                    ultimateMode: ultimateMode,
+                    pgn: pgnNotation.slice(),
+                    moveHistory: moveHistory.map(e => ({
+                        move: e.move,
+                        notation: e.notation
+                    }))
+                });
+            } else {
+                // 客户端不主动定颜色，等房主发送init
+                myColor = BLACK;
+            }
+
+            updatePlayerInfo();
+            enableGame();
+            renderAll();
+        });
+
+        connection.on('data', (data) => {
+            handleMessage(data);
+        });
+
+        connection.on('close', () => {
+            log('连接已关闭', 'warn');
+            handleDisconnect();
+        });
+
+        connection.on('error', (err) => {
+            log('连接错误: ' + (err && err.type ? err.type : JSON.stringify(err)), 'error');
+            handleDisconnect();
+        });
+
+        // 等待连接超时（如果是发起连接的一方）
+        if (!isHost) {
+            connectTimeout = setTimeout(() => {
+                if (!connection || !connection.open) {
+                    log('连接超时', 'error');
+                    document.getElementById('joinStatus').innerHTML = '<div class="connection-status status-error">连接超时，请确认邀请码正确</div>';
+                    setBusy('join', false);
+                    updateConnStatus('offline', '超时');
+                    destroyPeer();
+                }
+            }, 15000);
+        }
+    }
+
+    function sendMessage(data) {
+        if (!connection) {
+            log('没有连接对象', 'warn');
+            return false;
+        }
+        if (connection.open !== true) {
+            log('连接未打开，无法发送: ' + data.type, 'warn');
+            return false;
+        }
+        try {
+            connection.send(data);
+            return true;
+        } catch (e) {
+            log('发送失败: ' + e.message, 'error');
+            return false;
+        }
+    }
+
+    function handleMessage(data) {
+        if (!data || !data.type) {
+            log('无效消息: ' + JSON.stringify(data), 'error');
+            return;
+        }
+        log('收到: ' + data.type);
+
+        switch (data.type) {
+            case 'init':
+                myColor = BLACK;
+                if (Array.isArray(data.moveHistory) && data.moveHistory.length > 0) {
+                    // 全量同步：重建棋谱+局面（不渲染，init 最后统一渲染）
+                    moveHistory = data.moveHistory.map(e => ({
+                        saved: null,
+                        move: e.move,
+                        notation: e.notation
+                    }));
+                    pgnNotation = (data.pgn || []).slice();
+                    goToMove(-1, true);
+                    if (typeof data.ultimateMode === 'boolean') ultimateMode = data.ultimateMode;
+                } else {
+                    // 旧协议兼容 / 空开局
+                    if (data.board) board = data.board;
+                    if (data.currentTurn) currentTurn = data.currentTurn;
+                    if (typeof data.ultimateMode === 'boolean') ultimateMode = data.ultimateMode;
+                    if (Array.isArray(data.pgn)) pgnNotation = data.pgn.slice();
+                }
+                updatePlayerInfo();
+                enableGame();
+                renderAll();
+                sendMessage({ type: 'ack' });
+                break;
+
+            case 'ack':
+                log('对方已确认连接');
+                break;
+
+            case 'move':
+                applyRemoteMove(data);
+                break;
+
+            case 'undo-propose':
+                // 收到对手的悔棋申请
+                if (pendingUndo) {
+                    log('已有悔棋申请在处理中，忽略新申请', 'warn');
+                    break;
+                }
+                pendingUndo = {
+                    id: data.requestId,
+                    side: 'responder',
+                    expiresAt: Date.now() + 30000
+                };
+                showUndoResponderDialog();
+                startUndoTimer();
+                log('收到对手悔棋申请 #' + data.requestId);
+                break;
+
+            case 'undo-accept':
+                // 悔棋方收到：对方同意了我的悔棋申请
+                if (!pendingUndo || pendingUndo.id !== data.requestId || pendingUndo.side !== 'proposer') {
+                    log('悔棋申请状态不匹配，忽略', 'warn');
+                    break;
+                }
+                clearUndoTimer();
+                dismissUndoInfo();
+                pendingUndo = null;
+                // 悔棋方执行一次 undoLastMove（撤销自己刚走的那一步）
+                if (moveHistory.length > 0) {
+                    undoLastMove();
+                    log('✅ 悔棋成功');
+                }
+                break;
+
+            case 'undo-decline':
+                // 悔棋方收到：对方拒绝了
+                if (!pendingUndo || pendingUndo.id !== data.requestId) {
+                    log('悔棋申请状态不匹配，忽略', 'warn');
+                    break;
+                }
+                clearUndoTimer();
+                pendingUndo = null;
+                showUndoDeclinedDialog();
+                log('对手拒绝了悔棋申请', 'warn');
+                break;
+
+            case 'undo-cancel':
+                // 响应方收到：悔棋方取消了申请
+                if (!pendingUndo || pendingUndo.id !== data.requestId) break;
+                clearUndoTimer();
+                dismissUndoInfo();
+                pendingUndo = null;
+                log('对手取消了悔棋申请', 'warn');
+                break;
+
+            case 'sync-state':
+                // 强制同步：对方发起全量状态同步（用于异常恢复）
+                if (Array.isArray(data.pgn)) {
+                    pgnNotation = data.pgn.slice();
+                    moveHistory = data.moveHistory || [];
+                    // 重建 board
+                    goToMove(-1);
+                    log('已同步棋谱状态', 'warn');
+                }
+                break;
+
+            case 'newgame':
+                newGameLocal();
+                break;
+
+            case 'request-white':
+                // 房主收到：客户端想申请执白
+                if (isHost) {
+                    if (pendingWhiteRequest && pendingWhiteRequest.side === 'responder') {
+                        log('已有执白申请在处理中', 'warn');
+                        break;
+                    }
+                    const id = ++whiteRequestId;
+                    pendingWhiteRequest = { requestId: id, side: 'responder', expiresAt: Date.now() + 30000 };
+                    showWhiteRequestDialog(); // 函数内部已启动 timer
+                    log('收到执白申请 #' + id);
+                }
+                break;
+
+            case 'accept-white':
+                // 客户端收到：房主同意执白
+                if (pendingWhiteRequest && pendingWhiteRequest.requestId === data.requestId && pendingWhiteRequest.side === 'requester') {
+                    clearWhiteRequestTimer();
+                    pendingWhiteRequest = null;
+                    // 同步：双方都 newGameLocal + 互换 myColor
+                    myColor = WHITE; // 客户端变白
+                    newGameLocal();
+                    updatePlayerInfo();
+                    renderAll();
+                    const btn = document.getElementById('btnRequestWhite');
+                    if (btn) btn.style.display = 'none';
+                    log('✅ 执白成功！现在你执白');
+                }
+                break;
+
+            case 'decline-white':
+                if (pendingWhiteRequest && pendingWhiteRequest.requestId === data.requestId && pendingWhiteRequest.side === 'requester') {
+                    clearWhiteRequestTimer();
+                    pendingWhiteRequest = null;
+                    hideWhiteRequestDialog();
+                    const btn = document.getElementById('btnRequestWhite');
+                    if (btn) btn.disabled = false;
+                    log('执白申请被拒', 'warn');
+                }
+                break;
+
+            case 'chat':
+                // 收到对手弹幕
+                if (typeof data.text !== 'string') break;
+                if (data.text.length > 25) data.text = data.text.slice(0, 25);
+                showDanmaku(data.text, 'opponent');
+                break;
+
+            case 'ultimate':
+                if (typeof data.enabled === 'boolean') {
+                    ultimateMode = data.enabled;
+                    clearSelection();
+                    renderAll();
+                }
+                break;
+
+            case 'ping':
+                sendMessage({ type: 'pong', t: data.t });
+                break;
+
+            case 'pong':
+                break;
+
+            case 'sync-request':
+                // 对方请求全量同步
+                sendMessage({
+                    type: 'sync-state',
+                    board: cloneBoard(board),
+                    currentTurn: currentTurn,
+                    pgn: pgnNotation.slice(),
+                    moveHistory: moveHistory.map(e => ({
+                        move: e.move,
+                        notation: e.notation
+                    }))
+                });
+                break;
+
+            default:
+                log('未知消息: ' + data.type, 'warn');
+        }
+    }
+
+    function applyRemoteMove(data) {
+        try {
+            // 构造 move 描述
+            let move;
+            if (data.isCastle) {
+                const piece = board[data.fr][data.fc]; // 王
+                move = {
+                    fr: data.fr, fc: data.fc,
+                    tr: data.fr, tc: data.fc, // 占位
+                    piece: piece || 'K',
+                    capturedPiece: null,
+                    isCastle: true,
+                    isPromotion: false,
+                    promoChoice: null,
+                    partnerRow: data.pr,
+                    partnerCol: data.pc,
+                    isEnPassant: false
+                };
+            } else if (data.isPromotion) {
+                const piece = board[data.fr][data.fc];
+                const captured = board[data.tr][data.tc];
+                move = {
+                    fr: data.fr, fc: data.fc,
+                    tr: data.tr, tc: data.tc,
+                    piece: piece || 'P',
+                    capturedPiece: captured,
+                    isCastle: false,
+                    isPromotion: true,
+                    promoChoice: data.promoChoice,
+                    partnerRow: -1,
+                    partnerCol: -1,
+                    isEnPassant: false
+                };
+            } else {
+                const piece = board[data.fr][data.fc];
+                const isEP = !!data.isEnPassant;
+                const captured = isEP ? board[data.fr][data.tc] : board[data.tr][data.tc];
+                // 防御性检查：王不可击杀（且 piece 必须存在，否则视为攻击）
+                if (KING_IMMORTAL && captured && piece && captured.toUpperCase() === 'K' && pieceColor(captured) !== pieceColor(piece)) {
+                    log('对方尝试击杀王（已阻止），请重新同步', 'warn');
+                    sendMessage({ type: 'sync-request' });
+                    return;
+                }
+                move = {
+                    fr: data.fr, fc: data.fc,
+                    tr: data.tr, tc: data.tc,
+                    piece: piece || 'P',
+                    capturedPiece: captured,
+                    isCastle: false,
+                    isPromotion: false,
+                    promoChoice: null,
+                    partnerRow: -1,
+                    partnerCol: -1,
+                    isEnPassant: isEP
+                };
+            }
+
+            // 优先使用对方发来的 notation（保持双方一致），否则本地生成
+            const notation = data.notation || formatMoveNotation(move);
+
+            // recordMove 必须在 execute 之前
+            recordMove(move, notation);
+
+            // 执行走棋
+            let ok = true;
+            if (data.isCastle) {
+                ok = executeMove(data.fr, data.fc, -1, -1, true, data.pr, data.pc);
+            } else if (data.isPromotion) {
+                const color = pieceColor(board[data.fr][data.fc]);
+                const promo = color === WHITE ? data.promoChoice : data.promoChoice.toLowerCase();
+                const captured = board[data.tr][data.tc];
+                // 防御性：升变格不能吃王
+                if (KING_IMMORTAL && captured && captured.toUpperCase() === 'K' && pieceColor(captured) !== color) {
+                    log('对方尝试击杀王（升变格），已阻止', 'warn');
+                    moveHistory.pop();
+                    pgnNotation.pop();
+                    sendMessage({ type: 'sync-request' });
+                    return;
+                }
+                board[data.tr][data.tc] = promo;
+                board[data.fr][data.fc] = null;
+                if (captured) {
+                    if (color === WHITE) capturedByWhite.push(captured);
+                    else capturedByBlack.push(captured);
+                }
+                enPassantTarget = null;
+                lastMoveInfo = { fromRow: data.fr, fromCol: data.fc, toRow: data.tr, toCol: data.tc, piece: promo, capturedPiece: captured, isCastle: false };
+            } else {
+                ok = executeMove(data.fr, data.fc, data.tr, data.tc, false, -1, -1, !!data.isEnPassant);
+            }
+
+            if (!ok) {
+                log('对方发送了非法移动（吃王），已阻止', 'warn');
+                moveHistory.pop();
+                pgnNotation.pop();
+                sendMessage({ type: 'sync-request' });
+                return;
+            }
+
+            currentTurn = currentTurn === WHITE ? BLACK : WHITE;
+            clearSelection();
+            checkGameEnd(board);
+            renderAll();
+        } catch (e) {
+            log('应用远程移动失败: ' + e.message, 'error');
+        }
+    }
+
+    function handleDisconnect() {
+        if (!isConnected && !connection) return; // 避免重复
+        log('处理断线');
+        isConnected = false;
+        connection = null;
+        myColor = null;
+        updateConnStatus('offline', '已断开');
+
+        document.getElementById('playerInfo').style.display = 'none';
+        document.getElementById('roomCodeDisplay').style.display = 'none';
+        document.getElementById('copyHint').style.display = 'none';
+        document.getElementById('waitingStatus').style.display = 'none';
+        document.getElementById('createStatus').innerHTML = '';
+        document.getElementById('joinStatus').innerHTML = '<div class="connection-status status-error">连接已断开</div>';
+        setBusy('create', false);
+        setBusy('join', false);
+
+        // 清理执白请求状态
+        clearWhiteRequestTimer();
+        pendingWhiteRequest = null;
+        hideWhiteRequestDialog();
+
+        disableGame();
+        newGameLocal();
+    }
+
+    function disconnectGame() {
+        destroyPeer();
+        handleDisconnect();
+    }
+
+    function copyRoomCode() {
+        const code = document.getElementById('roomCodeDisplay').textContent;
+        if (!code) return;
+        const hint = document.getElementById('copyHint');
+
+        copyText(code).then((ok) => {
+            if (ok) {
+                hint.textContent = '✅ 已复制到剪贴板！';
+            } else {
+                hint.textContent = '❌ 复制失败，请手动选择文本复制';
+            }
+            setTimeout(() => {
+                hint.textContent = '点击邀请码复制（也可手动选中后按Ctrl+C）';
+            }, 3000);
+        });
+    }
+
+    function updatePlayerInfo() {
+        const infoDiv = document.getElementById('playerInfo');
+        infoDiv.style.display = 'block';
+
+        const yourColor = document.getElementById('yourColor');
+        const opponentColor = document.getElementById('opponentColor');
+
+        if (myColor === WHITE) {
+            yourColor.textContent = '白方 ⬜';
+            yourColor.className = 'player-color color-white';
+            opponentColor.textContent = '黑方 ⬛';
+            opponentColor.className = 'player-color color-black';
+        } else {
+            yourColor.textContent = '黑方 ⬛';
+            yourColor.className = 'player-color color-black';
+            opponentColor.textContent = '白方 ⬜';
+            opponentColor.className = 'player-color color-white';
+        }
+
+        // 申请执白按钮：仅当联机 + 非房主 + 当前是黑方时显示
+        const btnReq = document.getElementById('btnRequestWhite');
+        if (btnReq) {
+            if (isConnected && !isHost && myColor === BLACK) {
+                btnReq.style.display = 'block';
+                btnReq.disabled = !!pendingWhiteRequest;
+            } else {
+                btnReq.style.display = 'none';
+            }
+        }
+    }
+
+    function enableGame() {
+        document.getElementById('onlinePanel').style.display = 'none';
+        document.getElementById('statusPanel').classList.remove('game-disabled');
+    }
+
+    function disableGame() {
+        document.getElementById('onlinePanel').style.display = 'block';
+        document.getElementById('statusPanel').classList.add('game-disabled');
+        document.getElementById('turnText').textContent = '等待连接...';
+        document.getElementById('turnText').classList.remove('your-turn');
+    }
+
+    // ===== 棋盘游戏逻辑 =====
+    function getCastlePartners(brd, kingRow, kingCol) {
+        const king = brd[kingRow][kingCol];
+        if (!king || king.toUpperCase() !== 'K') return [];
+        const kingColor = pieceColor(king);
+        const partners = [];
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                if (r === kingRow && c === kingCol) continue;
+                const piece = brd[r][c];
+                if (!piece) continue;
+                if (!ultimateMode && pieceColor(piece) !== kingColor) continue;
+                const dr = r - kingRow, dc = c - kingCol;
+                const sameRow = dr === 0, sameCol = dc === 0, sameDiag = Math.abs(dr) === Math.abs(dc);
+                if (!sameRow && !sameCol && !sameDiag) continue;
+                const dist = Math.max(Math.abs(dr), Math.abs(dc));
+                if (dist < 3) continue;
+                let clear = true;
+                const stepR = dr === 0 ? 0 : (dr > 0 ? 1 : -1);
+                const stepC = dc === 0 ? 0 : (dc > 0 ? 1 : -1);
+                let cr = kingRow + stepR, cc = kingCol + stepC;
+                while (cr !== r || cc !== c) {
+                    if (brd[cr][cc] !== null) { clear = false; break; }
+                    cr += stepR; cc += stepC;
+                }
+                if (!clear) continue;
+                const res = calcCastleResult(kingRow, kingCol, r, c);
+                if (brd[res.nkr][res.nkc] !== null) continue;
+                if (brd[res.npr][res.npc] !== null) continue;
+                partners.push({ row: r, col: c });
+            }
+        }
+        return partners;
+    }
+
+    function calcCastleResult(kr, kc, pr, pc) {
+        const dr = pr - kr, dc = pc - kc;
+        const dist = Math.max(Math.abs(dr), Math.abs(dc));
+        let nkr, nkc, npr, npc;
+        if (dist % 2 === 1) {
+            const midR = (kr + pr) / 2, midC = (kc + pc) / 2;
+            if (dr === 0) {
+                if (pc > kc) { nkc = Math.ceil(midC); nkr = kr; npc = nkc - 1; npr = kr; }
+                else { nkc = Math.floor(midC); nkr = kr; npc = nkc + 1; npr = kr; }
+            } else if (dc === 0) {
+                if (pr > kr) { nkr = Math.ceil(midR); nkc = kc; npr = nkr - 1; npc = kc; }
+                else { nkr = Math.floor(midR); nkc = kc; npr = nkr + 1; npc = kc; }
+            } else {
+                if (pr > kr && pc > kc) { nkr = Math.ceil(midR); nkc = Math.ceil(midC); npr = nkr - 1; npc = nkc - 1; }
+                else if (pr > kr && pc < kc) { nkr = Math.ceil(midR); nkc = Math.floor(midC); npr = nkr - 1; npc = nkc + 1; }
+                else if (pr < kr && pc > kc) { nkr = Math.floor(midR); nkc = Math.ceil(midC); npr = nkr + 1; npc = nkc - 1; }
+                else { nkr = Math.floor(midR); nkc = Math.floor(midC); npr = nkr + 1; npc = nkc + 1; }
+            }
+        } else {
+            const midR = (kr + pr) / 2, midC = (kc + pc) / 2;
+            nkr = midR; nkc = midC;
+            if (dr === 0) { npr = midR; npc = midC + (midC > pc ? 1 : -1); }
+            else if (dc === 0) { npc = midC; npr = midR + (midR > pr ? 1 : -1); }
+            else { const ddr = midR > pr ? 1 : -1, ddc = midC > pc ? 1 : -1; npr = midR + ddr; npc = midC + ddc; }
+        }
+        return { nkr, nkc, npr, npc };
+    }
+
+    function getPseudoMoves(r, c, brd) {
+        const piece = brd[r][c];
+        if (!piece) return [];
+        const moves = [], color = pieceColor(piece), isW = color === WHITE;
+        const dir = isW ? -1 : 1, startRow = isW ? 6 : 1, promoRow = isW ? 0 : 7;
+
+        // 王不可击杀：判断目标格是否是对方王
+        const isOpponentKing = (t) => KING_IMMORTAL && t && pieceColor(t) !== color && t.toUpperCase() === 'K';
+
+        function add(tr, tc) {
+            if (!inBounds(tr, tc)) return;
+            const t = brd[tr][tc];
+            if (!t) { moves.push({ row: tr, col: tc, isCapture: false, isCastle: false }); return; }
+            if (pieceColor(t) === color) return; // 己方子，不能走
+            if (isOpponentKing(t)) return; // 对方王不可击杀
+            moves.push({ row: tr, col: tc, isCapture: true, isCastle: false });
+        }
+        function slide(dR, dC) {
+            for (let i = 1; i < 8; i++) {
+                const tr = r + dR * i, tc = c + dC * i;
+                if (!inBounds(tr, tc)) break;
+                const t = brd[tr][tc];
+                if (!t) { moves.push({ row: tr, col: tc, isCapture: false, isCastle: false }); continue; }
+                if (pieceColor(t) === color) break; // 己方子，挡住
+                if (isOpponentKing(t)) break; // 对方王不可击杀（阻挡）
+                moves.push({ row: tr, col: tc, isCapture: true, isCastle: false });
+                break; // 吃子后停
+            }
+        }
+
+        switch (piece.toUpperCase()) {
+            case 'K':
+                for (let dr = -1; dr <= 1; dr++)
+                    for (let dc = -1; dc <= 1; dc++)
+                        if (dr || dc) add(r + dr, c + dc);
+                break;
+            case 'Q':
+                for (let dr = -1; dr <= 1; dr++)
+                    for (let dc = -1; dc <= 1; dc++)
+                        if (dr || dc) slide(dr, dc);
+                break;
+            case 'R':
+                slide(0, 1); slide(0, -1); slide(1, 0); slide(-1, 0);
+                break;
+            case 'B':
+                slide(1, 1); slide(1, -1); slide(-1, 1); slide(-1, -1);
+                break;
+            case 'N':
+                for (const [dr, dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) add(r + dr, c + dc);
+                break;
+            case 'P': {
+                const fwd = r + dir;
+                if (inBounds(fwd, c) && !brd[fwd][c]) {
+                    moves.push({ row: fwd, col: c, isCapture: false, isPromotion: fwd === promoRow });
+                    if (r === startRow && !brd[r + 2 * dir][c])
+                        moves.push({ row: r + 2 * dir, col: c, isCapture: false, isPawnDouble: true });
+                }
+                for (const dc of [-1, 1]) {
+                    const tc = c + dc, tr = r + dir;
+                    if (inBounds(tr, tc)) {
+                        const t = brd[tr][tc];
+                        if (t && pieceColor(t) !== color) {
+                            if (!isOpponentKing(t)) moves.push({ row: tr, col: tc, isCapture: true, isPromotion: tr === promoRow });
+                        }
+                        if (enPassantTarget && enPassantTarget.row === tr && enPassantTarget.col === tc)
+                            moves.push({ row: tr, col: tc, isCapture: true, isEnPassant: true });
+                    }
+                }
+                break;
+            }
+        }
+        return moves;
+    }
+
+    function hasAnyLegalMove(brd, turn) {
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = brd[r][c];
+                if (!p || pieceColor(p) !== turn) continue;
+                if (getPseudoMoves(r, c, brd).length > 0) return true;
+                if (p.toUpperCase() === 'K' && getCastlePartners(brd, r, c).length > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    function checkGameEnd(brd) {
+        let w = 0, b = 0;
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const p = brd[r][c];
+                if (p && p === p.toUpperCase()) w++;
+                else if (p) b++;
+            }
+        }
+        if (w === 0) { gameOver = true; gameOverMessage = '黑方获胜！白方被全歼！'; return true; }
+        if (b === 0) { gameOver = true; gameOverMessage = '白方获胜！黑方被全歼！'; return true; }
+        const next = currentTurn === WHITE ? BLACK : WHITE;
+        if (!hasAnyLegalMove(brd, next)) {
+            gameOver = true;
+            gameOverMessage = (next === WHITE ? '黑方' : '白方') + '获胜！对方无子可动！';
+            return true;
+        }
+        return false;
+    }
+
+    function executeMove(fr, fc, tr, tc, isCastle, pr, pc, isEnPassant) {
+        const piece = board[fr][fc];
+        let captured = null;
+        if (isCastle) {
+            const res = calcCastleResult(fr, fc, pr, pc);
+            const partner = board[pr][pc];
+            board[fr][fc] = null;
+            board[pr][pc] = null;
+            board[res.nkr][res.nkc] = piece;
+            board[res.npr][res.npc] = partner;
+            lastMoveInfo = { fromRow: fr, fromCol: fc, toRow: res.nkr, toCol: res.nkc, piece, capturedPiece: null, isCastle: true };
+        } else {
+            captured = board[tr][tc];
+            // 防御：王不可击杀。如果目标格是对方王，阻止并回滚
+            if (KING_IMMORTAL && captured && captured.toUpperCase() === 'K' && pieceColor(captured) !== pieceColor(piece)) {
+                log('防御性阻止：王不可击杀', 'warn');
+                return false;
+            }
+            board[tr][tc] = piece;
+            board[fr][fc] = null;
+            lastMoveInfo = { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc, piece: board[tr][tc], capturedPiece: captured, isCastle: false };
+            if (isEnPassant) {
+                const epCap = board[fr][tc];
+                if (KING_IMMORTAL && epCap && epCap.toUpperCase() === 'K') {
+                    log('防御性阻止：王不可击杀（EP）', 'warn');
+                    board[tr][tc] = captured;
+                    board[fr][fc] = piece;
+                    return false;
+                }
+                captured = epCap;
+                board[fr][tc] = null;
+                lastMoveInfo.capturedPiece = captured;
+                lastMoveInfo.isEnPassant = true;
+            }
+            if (piece.toUpperCase() === 'P' && Math.abs(tr - fr) === 2) enPassantTarget = { row: (fr + tr) / 2, col: fc };
+            else enPassantTarget = null;
+        }
+        if (captured) {
+            if (pieceColor(piece) === WHITE) capturedByWhite.push(captured);
+            else capturedByBlack.push(captured);
+        }
+        return true;
+    }
+
+    function clearSelection() {
+        selectedRow = -1;
+        selectedCol = -1;
+        legalMoves = [];
+        castlePartners = [];
+    }
+
+    function renderAll() {
+        renderBoard();
+        updateStatus();
+        updateModeButton();
+        renderInfoPanels();
+    }
+
+    function renderBoard() {
+        const boardEl = document.getElementById('board');
+        boardEl.innerHTML = '';
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell', (r + c) % 2 === 0 ? 'light' : 'dark');
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                if (selectedRow === r && selectedCol === c) cell.classList.add('selected');
+                const move = legalMoves.find(m => m.row === r && m.col === c);
+                if (move) {
+                    if (move.isCapture || move.isCastle) cell.classList.add('highlight-capture');
+                    else cell.classList.add('highlight-move');
+                }
+                const partner = castlePartners.find(p => p.row === r && p.col === c);
+                if (partner) {
+                    cell.classList.add('castle-partner');
+                    const partnerPiece = board[r][c];
+                    if (ultimateMode && partnerPiece && selectedRow >= 0 && selectedCol >= 0) {
+                        const kingPiece = board[selectedRow][selectedCol];
+                        if (kingPiece && pieceColor(partnerPiece) !== pieceColor(kingPiece)) {
+                            cell.classList.add('ultimate');
+                        }
+                    }
+                    const icon = document.createElement('span');
+                    icon.className = 'castle-partner-icon';
+                    icon.textContent = '⇄';
+                    cell.appendChild(icon);
+                }
+                if (lastMoveInfo && !gameOver) {
+                    if (lastMoveInfo.fromRow === r && lastMoveInfo.fromCol === c) cell.classList.add('last-move-from');
+                    if (lastMoveInfo.toRow === r && lastMoveInfo.toCol === c) cell.classList.add('last-move-to');
+                }
+                const piece = board[r][c];
+                if (piece) {
+                    const span = document.createElement('span');
+                    span.classList.add('piece');
+                    span.textContent = UNICODE[piece];
+                    const canInteract = !isConnected || (currentTurn === myColor && pieceColor(piece) === myColor);
+                    if (canInteract && !gameOver) span.classList.add('draggable');
+                    cell.appendChild(span);
+                }
+                cell.addEventListener('click', () => onCellClick(r, c));
+                boardEl.appendChild(cell);
+            }
+        }
+        renderCoordinates();
+    }
+
+    function renderCoordinates() {
+        document.getElementById('rankLabels').innerHTML = '';
+        document.getElementById('fileLabels').innerHTML = '';
+        for (let r = 0; r < 8; r++) {
+            const span = document.createElement('span');
+            span.textContent = (8 - r).toString();
+            document.getElementById('rankLabels').appendChild(span);
+        }
+        for (const f of ['a','b','c','d','e','f','g','h']) {
+            const span = document.createElement('span');
+            span.textContent = f;
+            document.getElementById('fileLabels').appendChild(span);
+        }
+    }
+
+    function updateStatus() {
+        document.getElementById('turnDot').className = 'turn-dot ' + (currentTurn === WHITE ? 'white' : 'black');
+
+        const turnText = document.getElementById('turnText');
+        if (gameOver) {
+            turnText.textContent = gameOverMessage;
+            turnText.classList.remove('your-turn');
+        } else if (isConnected) {
+            const isMyTurn = currentTurn === myColor;
+            turnText.textContent = (currentTurn === WHITE ? '白方' : '黑方') + '回合' + (isMyTurn ? ' (你)' : ' (对手)');
+            turnText.classList.toggle('your-turn', isMyTurn);
+        } else {
+            turnText.textContent = '等待连接...';
+            turnText.classList.remove('your-turn');
+        }
+
+        document.getElementById('gameOverBadge').style.display = gameOver ? 'inline-block' : 'none';
+        document.getElementById('modeSubtitle').textContent = ultimateMode ? '究极血战模式 · 可绑架敌方棋子' : '歼灭模式 · 终极易位';
+    }
+
+    function updateModeButton() {
+        const btn = document.getElementById('btnUltimateMode');
+        btn.textContent = ultimateMode ? '⚡ 关闭究极模式' : '⚡ 究极模式';
+        btn.classList.toggle('ultimate', ultimateMode);
+    }
+
+    // ====== 信息面板（棋谱+子力）渲染 ======
+    function renderInfoPanels() {
+        renderMaterial();
+        renderPgn();
+    }
+
+    function renderMaterial() {
+        const mat = calcMaterial(board);
+        const wEl = document.getElementById('whiteMaterial');
+        const bEl = document.getElementById('blackMaterial');
+        const wCap = document.getElementById('whiteCaptured');
+        const bCap = document.getElementById('blackCaptured');
+        const adv = document.getElementById('materialAdvantage');
+
+        if (wEl) wEl.textContent = mat.white;
+        if (bEl) bEl.textContent = mat.black;
+        // 击杀区颜色：白方击杀区显示黑方子（黑色），黑方击杀区显示白方子（白色）
+        if (wCap) {
+            wCap.textContent = capturedDisplay(capturedByWhite) || '';
+            wCap.style.color = '#444';
+            wCap.style.textShadow = '0 0 1px #000';
+        }
+        if (bCap) {
+            bCap.textContent = capturedDisplay(capturedByBlack) || '';
+            bCap.style.color = '#fff';
+            bCap.style.textShadow = '0 0 4px #888';
+        }
+
+        if (adv) {
+            if (mat.white > mat.black) {
+                adv.textContent = `白方领先 ${mat.white - mat.black}`;
+                adv.style.color = '#fff';
+            } else if (mat.black > mat.white) {
+                adv.textContent = `黑方领先 ${mat.black - mat.white}`;
+                adv.style.color = '#ddd';
+            } else {
+                adv.textContent = '形势均衡';
+                adv.style.color = 'var(--accent)';
+            }
+        }
+    }
+
+    function renderPgn() {
+        const panel = document.getElementById('pgnPanel');
+        if (!panel) return;
+        if (pgnNotation.length === 0) {
+            panel.innerHTML = '<div class="pgn-empty">暂无棋谱</div>';
+            return;
+        }
+
+        // 一行一对（白+黑），不足时只显示白方
+        let html = '';
+        for (let i = 0; i < pgnNotation.length; i += 2) {
+            const num = Math.floor(i / 2) + 1;
+            const white = pgnNotation[i];
+            const black = pgnNotation[i + 1];
+            const whiteStepIdx = i + 1; // 第 i+1 步结束
+            const blackStepIdx = i + 2;
+            const isWhiteCurrent = (viewStep === whiteStepIdx);
+            const isBlackCurrent = (viewStep === blackStepIdx);
+            html += '<div class="pgn-row">';
+            html += '<span class="pgn-num">' + num + '.</span>';
+            html += '<span class="pgn-white' + (isWhiteCurrent ? ' current' : '') + '" data-step="' + whiteStepIdx + '" onclick="goToMove(' + whiteStepIdx + ')">' + escapeHtml(white) + '</span>';
+            if (black != null) {
+                html += '<span class="pgn-black' + (isBlackCurrent ? ' current' : '') + '" data-step="' + blackStepIdx + '" onclick="goToMove(' + blackStepIdx + ')">' + escapeHtml(black) + '</span>';
+            } else {
+                html += '<span class="pgn-black"></span>';
+            }
+            html += '</div>';
+        }
+        panel.innerHTML = html;
+
+        // 滚到当前行：仅滚动棋谱面板内部，不影响整个页面
+        const currentRow = panel.querySelector('.pgn-row .current');
+        if (currentRow) {
+            const row = currentRow.closest('.pgn-row');
+            if (row && panel.scrollHeight > panel.clientHeight) {
+                // 计算 row 相对于 panel 的位置
+                const rowTop = row.offsetTop;
+                const rowBottom = rowTop + row.offsetHeight;
+                const viewTop = panel.scrollTop;
+                const viewBottom = viewTop + panel.clientHeight;
+                if (rowTop < viewTop) {
+                    panel.scrollTop = rowTop;
+                } else if (rowBottom > viewBottom) {
+                    panel.scrollTop = rowBottom - panel.clientHeight;
+                }
+            }
+        }
+    }
+
+    function updatePgnHighlight() {
+        // 只更新高亮，避免重渲染导致滚动跳动
+        const panel = document.getElementById('pgnPanel');
+        if (!panel) return;
+        panel.querySelectorAll('.pgn-white, .pgn-black').forEach(el => {
+            const step = parseInt(el.dataset.step, 10);
+            el.classList.toggle('current', step === viewStep);
+        });
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+    }
+
+    function buildFullPgn() {
+        if (pgnNotation.length === 0) return '';
+        let s = '';
+        for (let i = 0; i < pgnNotation.length; i += 2) {
+            const num = Math.floor(i / 2) + 1;
+            s += num + '. ' + pgnNotation[i];
+            if (pgnNotation[i + 1] != null) s += ' ' + pgnNotation[i + 1];
+            s += ' ';
+        }
+        return s.trim();
+    }
+
+    function togglePgnExport() {
+        const el = document.getElementById('pgnExport');
+        if (!el) return;
+        const pgn = buildFullPgn();
+        el.textContent = pgn || '（暂无）';
+        el.classList.toggle('show');
+    }
+
+    function copyPgn() {
+        const pgn = buildFullPgn();
+        if (!pgn) {
+            log('棋谱为空，无法复制', 'warn');
+            return;
+        }
+        copyText(pgn).then(ok => {
+            log(ok ? '✅ PGN 已复制' : '❌ 复制失败', ok ? 'info' : 'error');
+        });
+    }
+
+    function goPrevMove() {
+        if (moveHistory.length === 0) return;
+        const target = viewStep <= 0 ? 0 : viewStep - 1;
+        goToMove(target);
+    }
+
+    function goNextMove() {
+        if (moveHistory.length === 0) return;
+        if (viewStep >= moveHistory.length) return;
+        const target = viewStep + 1;
+        goToMove(target);
+    }
+
+    function goToLatest() {
+        goToMove(-1);
+    }
+
+    function onCellClick(row, col) {
+        if (gameOver || promotionPending) return;
+
+        if (isConnected && currentTurn !== myColor) return;
+
+        const piece = board[row][col];
+
+        if (selectedRow >= 0 && selectedCol >= 0 && castlePartners.some(p => p.row === row && p.col === col)) {
+            performCastle(selectedRow, selectedCol, row, col);
+            return;
+        }
+
+        if (selectedRow >= 0 && selectedCol >= 0) {
+            const move = legalMoves.find(m => m.row === row && m.col === col);
+            if (move) {
+                if (move.isCastle) {
+                    performCastle(selectedRow, selectedCol, move.castlePartnerRow, move.castlePartnerCol);
+                } else if (move.isPromotion) {
+                    promotionPending = { fr: selectedRow, fc: selectedCol, tr: row, tc: col, piece: board[selectedRow][selectedCol] };
+                    showPromotion();
+                } else {
+                    performNormalMove(selectedRow, selectedCol, row, col);
+                }
+                return;
+            }
+        }
+
+        if (piece && (!isConnected || pieceColor(piece) === myColor)) {
+            selectPiece(row, col);
+            return;
+        }
+
+        clearSelection();
+        renderAll();
+    }
+
+    function selectPiece(r, c) {
+        selectedRow = r;
+        selectedCol = c;
+        legalMoves = getPseudoMoves(r, c, board);
+        castlePartners = [];
+        if (board[r][c].toUpperCase() === 'K') {
+            castlePartners = getCastlePartners(board, r, c);
+            for (const p of castlePartners) {
+                const res = calcCastleResult(r, c, p.row, p.col);
+                legalMoves.push({ row: res.nkr, col: res.nkc, isCapture: false, isCastle: true, castlePartnerRow: p.row, castlePartnerCol: p.col });
+            }
+        }
+        renderAll();
+    }
+
+    function performNormalMove(fr, fc, tr, tc) {
+        const piece = board[fr][fc];
+        const isEP = piece && piece.toUpperCase() === 'P' && fr !== tr && !board[tr][tc];
+        // 吃过路兵的真实被吃子是 (fr, tc)
+        const captured = isEP ? board[fr][tc] : board[tr][tc];
+        // 防御性检查：王不可击杀
+        if (KING_IMMORTAL && captured && captured.toUpperCase() === 'K' && pieceColor(captured) !== pieceColor(piece)) {
+            log('王不可击杀，已阻止', 'warn');
+            return;
+        }
+        const move = {
+            fr, fc, tr, tc,
+            piece,
+            capturedPiece: captured,
+            isCastle: false,
+            isPromotion: false,
+            promoChoice: null,
+            partnerRow: -1,
+            partnerCol: -1,
+            isEnPassant: isEP
+        };
+        const notation = formatMoveNotation(move);
+
+        // 记录历史（必须在 executeMove 之前）
+        recordMove(move, notation);
+
+        // 执行走棋
+        const ok = executeMove(fr, fc, tr, tc, false, -1, -1, isEP);
+        if (!ok) {
+            // 回滚：移除刚记录的 history
+            moveHistory.pop();
+            pgnNotation.pop();
+            clearSelection();
+            renderAll();
+            log('移动被阻止：已回滚', 'warn');
+            return;
+        }
+        currentTurn = currentTurn === WHITE ? BLACK : WHITE;
+        clearSelection();
+        checkGameEnd(board);
+        renderAll();
+
+        if (isConnected) {
+            sendMessage({
+                type: 'move',
+                fr, fc, tr, tc,
+                isCastle: false,
+                isPromotion: false,
+                isEnPassant: isEP,
+                notation
+            });
+        }
+    }
+
+    function performCastle(kr, kc, pr, pc) {
+        const piece = board[kr][kc];
+        const partner = board[pr][pc];
+        const move = {
+            fr: kr, fc: kc,
+            tr: kr, tc: kc, // 占位
+            piece,
+            capturedPiece: null,
+            isCastle: true,
+            isPromotion: false,
+            promoChoice: null,
+            partnerRow: pr,
+            partnerCol: pc,
+            isEnPassant: false
+        };
+        const notation = formatMoveNotation(move);
+        recordMove(move, notation);
+        executeMove(kr, kc, -1, -1, true, pr, pc);
+        currentTurn = currentTurn === WHITE ? BLACK : WHITE;
+        clearSelection();
+        checkGameEnd(board);
+        renderAll();
+
+        if (isConnected) {
+            sendMessage({
+                type: 'move',
+                fr: kr, fc: kc,
+                pr, pc,
+                isCastle: true,
+                isEnPassant: false,
+                notation
+            });
+        }
+    }
+
+    function showPromotion() {
+        const overlay = document.getElementById('promotionOverlay');
+        const dialog = document.getElementById('promotionDialog');
+        dialog.innerHTML = '';
+        const color = pieceColor(promotionPending.piece);
+        const pieces = color === WHITE ? ['Q','R','B','N'] : ['q','r','b','n'];
+        for (const p of pieces) {
+            const opt = document.createElement('div');
+            opt.className = 'promotion-option';
+            opt.textContent = UNICODE[p];
+            opt.addEventListener('click', () => {
+                overlay.style.display = 'none';
+                completePromotion(p.toUpperCase());
+            });
+            dialog.appendChild(opt);
+        }
+        overlay.style.display = 'flex';
+    }
+
+    function completePromotion(choice) {
+        if (!promotionPending) return;
+        const { fr, fc, tr, tc } = promotionPending;
+        const piece = board[fr][fc];
+        const color = pieceColor(piece);
+        const promo = color === WHITE ? choice : choice.toLowerCase();
+        const captured = board[tr][tc];
+
+        const move = {
+            fr, fc, tr, tc,
+            piece,
+            capturedPiece: captured,
+            isCastle: false,
+            isPromotion: true,
+            promoChoice: choice,
+            partnerRow: -1,
+            partnerCol: -1,
+            isEnPassant: false
+        };
+        const notation = formatMoveNotation(move);
+
+        recordMove(move, notation);
+
+        // 执行升变
+        board[tr][tc] = promo;
+        board[fr][fc] = null;
+        if (captured) {
+            if (color === WHITE) capturedByWhite.push(captured);
+            else capturedByBlack.push(captured);
+        }
+        enPassantTarget = null;
+        lastMoveInfo = { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc, piece: promo, capturedPiece: captured, isCastle: false };
+
+        promotionPending = null;
+        currentTurn = currentTurn === WHITE ? BLACK : WHITE;
+        clearSelection();
+        checkGameEnd(board);
+        renderAll();
+
+        if (isConnected) {
+            sendMessage({
+                type: 'move',
+                fr, fc, tr, tc,
+                isCastle: false,
+                isPromotion: true,
+                promoChoice: choice.toUpperCase(),
+                notation
+            });
+        }
+    }
+
+    function toggleUltimateMode() {
+        ultimateMode = !ultimateMode;
+        clearSelection();
+        renderAll();
+
+        if (isConnected) {
+            sendMessage({ type: 'ultimate', enabled: ultimateMode });
+        }
+    }
+
+    function toggleRules() {
+        document.getElementById('rulesOverlay').classList.toggle('show');
+    }
+
+    function newGameLocal() {
+        board = cloneBoard(INITIAL_BOARD);
+        currentTurn = WHITE;
+        clearSelection();
+        lastMoveInfo = null;
+        moveHistory = [];
+        pgnNotation = [];
+        viewStep = -1;
+        isViewingHistory = false;
+        gameOver = false;
+        gameOverMessage = '';
+        capturedByWhite = [];
+        capturedByBlack = [];
+        enPassantTarget = null;
+        promotionPending = null;
+        // 清理悔棋申请状态
+        if (pendingUndo) {
+            clearUndoTimer();
+            const overlay = document.getElementById('undoOverlay');
+            if (overlay) overlay.style.display = 'none';
+            pendingUndo = null;
+        }
+        document.getElementById('promotionOverlay').style.display = 'none';
+        document.getElementById('rulesOverlay').classList.remove('show');
+        renderAll();
+    }
+
+    function newGame() {
+        if (isConnected) {
+            sendMessage({ type: 'newgame' });
+        }
+        newGameLocal();
+    }
+
+    // ===== 悔棋申请协议（悔棋方撤销自己刚走的那一步）=====
+    // 悔棋语义：悔棋方撤销"自己刚走的那一步"，让自己重新走。
+    // 权限：只有 history 顶部项是"悔棋方自己走的"才能申请悔棋。
+    // 撤销量：双方各执行一次 undoLastMove（撤销 history 顶部同一步）。
+    // 流程：
+    //   1. 刚走完的一方点悔棋 → 发送 'undo-propose'
+    //   2. 对手收到 → 弹出对话框
+    //   3. 对手同意 → 发送 'undo-accept'；双方各执行一次 undoLastMove
+    //   4. 对手拒绝 → 发送 'undo-decline'
+    //   5. 悔棋方主动取消 → 发送 'undo-cancel'
+    //   6. 30 秒无响应 → 自动取消
+    function undoMove() {
+        if (gameOver) {
+            log('游戏已结束，无法悔棋', 'warn');
+            return;
+        }
+        if (moveHistory.length === 0) {
+            log('没有可悔棋的步数', 'warn');
+            return;
+        }
+        // 权限检查：只有"刚走完这一步的人"才能悔棋
+        // 即 history 顶部项 saved.turn === myColor（联机）/ 顶部项是 currentTurn 反方（本地）
+        const top = moveHistory[moveHistory.length - 1];
+        if (!top || !top.saved) {
+            log('无法悔棋：历史记录异常', 'warn');
+            return;
+        }
+        if (isConnected) {
+            if (top.saved.turn !== myColor) {
+                log('刚走完的是对手，轮不到你悔棋', 'warn');
+                return;
+            }
+        } else {
+            // 本地模式：通过 currentTurn 反推（刚走完的是 currentTurn 的对面）
+            // 也可以用 top.saved.turn === 翻转后的 currentTurn
+            // 直接判断 top.saved.turn 是"走棋方"：white=1, black=-1，currentTurn 是轮到走的一方
+            // 刚走完 = currentTurn 反方，所以 top.saved.turn !== currentTurn
+            if (top.saved.turn === currentTurn) {
+                log('当前轮到你走，但你还没走，不能悔棋', 'warn');
+                return;
+            }
+        }
+        if (pendingUndo) {
+            log('已有悔棋申请在处理中', 'warn');
+            return;
+        }
+        // 离历史视图时，先回到最新再发起申请
+        if (isViewingHistory) {
+            goToLatest();
+        }
+
+        if (isConnected) {
+            // 联机：发起悔棋申请
+            const id = ++undoRequestId;
+            pendingUndo = { id, side: 'proposer', expiresAt: Date.now() + 30000 };
+            sendMessage({ type: 'undo-propose', requestId: id });
+            showUndoProposerDialog();
+            startUndoTimer();
+            log('已发送悔棋申请 #' + id);
+        } else {
+            // 本地双人/单机：没有对手可询问，直接悔棋（撤销刚走的那一步）
+            undoLastMove();
+        }
+    }
+
+    function clearUndoTimer() {
+        if (undoTimer) { clearInterval(undoTimer); undoTimer = null; }
+    }
+
+    function startUndoTimer() {
+        clearUndoTimer();
+        undoTimer = setInterval(() => {
+            if (!pendingUndo) { clearUndoTimer(); return; }
+            const remain = Math.max(0, Math.ceil((pendingUndo.expiresAt - Date.now()) / 1000));
+            const cdEl = document.getElementById('undoCountdown');
+            if (cdEl) {
+                cdEl.textContent = '倒计时：' + remain + ' 秒';
+                cdEl.classList.toggle('warn', remain <= 10 && remain > 3);
+                cdEl.classList.toggle('danger', remain <= 3);
+            }
+            if (remain <= 0) {
+                // 超时
+                cancelUndo(true);
+            }
+        }, 250);
+    }
+
+    function cancelUndo(isTimeout) {
+        if (!pendingUndo) return;
+        const wasPending = pendingUndo;
+        clearUndoTimer();
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        pendingUndo = null;
+        // 通知对手
+        if (isConnected && !isTimeout) {
+            sendMessage({ type: 'undo-cancel', requestId: wasPending.id });
+        }
+        if (isTimeout) {
+            log('悔棋申请超时，已取消', 'warn');
+        }
+    }
+
+    function acceptUndo() {
+        if (!pendingUndo || pendingUndo.side !== 'responder') return;
+        const reqId = pendingUndo.id;
+        clearUndoTimer();
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        pendingUndo = null;
+        if (isConnected) {
+            sendMessage({ type: 'undo-accept', requestId: reqId });
+        }
+        // 自己执行一次 undoLastMove（撤销悔棋方刚走的那一步）
+        if (moveHistory.length > 0) {
+            undoLastMove();
+            log('✅ 已同意悔棋');
+        }
+    }
+
+    function declineUndo() {
+        if (!pendingUndo || pendingUndo.side !== 'responder') return;
+        const reqId = pendingUndo.id;
+        clearUndoTimer();
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        pendingUndo = null;
+        if (isConnected) {
+            sendMessage({ type: 'undo-decline', requestId: reqId });
+        }
+        log('已拒绝悔棋申请');
+    }
+
+    function showUndoProposerDialog() {
+        const overlay = document.getElementById('undoOverlay');
+        const modal = document.getElementById('undoModal');
+        if (!overlay || !modal) return;
+        modal.innerHTML = `
+            <h3>↩ 悔棋申请</h3>
+            <p>已向对手发送悔棋申请</p>
+            <p>请等待对方响应<span class="waiting-dots"></span></p>
+            <div class="undo-countdown" id="undoCountdown">倒计时：30 秒</div>
+            <div class="undo-modal-buttons">
+                <button class="undo-btn undo-btn-cancel" onclick="cancelUndo(false)">取消申请</button>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+    }
+
+    function showUndoResponderDialog() {
+        const overlay = document.getElementById('undoOverlay');
+        const modal = document.getElementById('undoModal');
+        if (!overlay || !modal) return;
+        modal.innerHTML = `
+            <h3>↩ 对手请求悔棋</h3>
+            <p>对手希望撤销他上一步的走子</p>
+            <p>你是否同意？</p>
+            <div class="undo-countdown" id="undoCountdown">倒计时：30 秒</div>
+            <div class="undo-modal-buttons">
+                <button class="undo-btn undo-btn-accept" onclick="acceptUndo()">✓ 同意</button>
+                <button class="undo-btn undo-btn-decline" onclick="declineUndo()">✗ 拒绝</button>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+    }
+
+    function showUndoDeclinedDialog() {
+        const overlay = document.getElementById('undoOverlay');
+        const modal = document.getElementById('undoModal');
+        if (!overlay || !modal) return;
+        modal.innerHTML = `
+            <h3>✗ 悔棋被拒</h3>
+            <p>对手拒绝了你的悔棋申请</p>
+            <div class="undo-modal-buttons">
+                <button class="undo-btn undo-btn-cancel" onclick="dismissUndoInfo()">知道了</button>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+        // 3秒后自动关闭
+        setTimeout(dismissUndoInfo, 3000);
+    }
+
+    function dismissUndoInfo() {
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    // ===== 聊天弹幕（联机时）=====
+    function sendChat() {
+        const input = document.getElementById('chatInput');
+        if (!input) return;
+        const text = input.value.trim();
+        if (!text) return;
+        if (text.length > 25) {
+            log('弹幕长度不能超过 25', 'warn');
+            return;
+        }
+        if (!isConnected) {
+            log('未连接，无法发送弹幕', 'warn');
+            return;
+        }
+        // 己方立即显示
+        showDanmaku(text, 'own');
+        // 广播给对手
+        sendMessage({ type: 'chat', text: text });
+        input.value = '';
+    }
+
+    function showDanmaku(text, kind) {
+        const overlay = document.getElementById('danmakuOverlay');
+        if (!overlay) return;
+        const item = document.createElement('div');
+        item.className = 'danmaku-item';
+        if (kind === 'own') {
+            item.style.background = 'rgba(201,169,110,0.85)';
+            item.style.color = '#000';
+        } else {
+            item.style.background = 'rgba(255,255,255,0.85)';
+            item.style.color = '#000';
+        }
+        item.textContent = text;
+        // 随机纵向位置（避开边缘）
+        const top = 10 + Math.random() * Math.max(20, overlay.clientHeight - 60);
+        item.style.top = top + 'px';
+        overlay.appendChild(item);
+        // 动画结束后移除
+        setTimeout(() => {
+            if (item.parentNode) item.parentNode.removeChild(item);
+        }, 7200);
+    }
+
+    // ===== 执白请求协议（非房主 → 房主）=====
+    // 流程：
+    //   1. 客户端（执黑）点"申请执白" → 发送 'request-white'（含 requestId）
+    //   2. 房主收到 → 弹窗"申请执白"
+    //   3. 房主同意 → 发送 'accept-white'；双方各自 newGameLocal + 互换 myColor
+    //   4. 房主拒绝 → 发送 'decline-white'
+    //   5. 30 秒无响应 → 自动取消
+    function requestWhite() {
+        if (!isConnected) {
+            log('未连接，无法申请执白', 'warn');
+            return;
+        }
+        if (isHost) {
+            log('房主默认执白，无需申请', 'warn');
+            return;
+        }
+        if (myColor !== BLACK) {
+            log('你当前已是白方', 'warn');
+            return;
+        }
+        if (pendingWhiteRequest) {
+            log('已有执白申请在处理中', 'warn');
+            return;
+        }
+        const id = ++whiteRequestId;
+        pendingWhiteRequest = { requestId: id, side: 'requester', expiresAt: Date.now() + 30000 };
+        sendMessage({ type: 'request-white', requestId: id });
+        const btn = document.getElementById('btnRequestWhite');
+        if (btn) btn.disabled = true;
+        startWhiteRequestTimer();
+        log('已发送执白申请 #' + id);
+    }
+
+    function startWhiteRequestTimer() {
+        clearWhiteRequestTimer();
+        whiteRequestTimer = setInterval(() => {
+            if (!pendingWhiteRequest) { clearWhiteRequestTimer(); return; }
+            const remain = Math.max(0, Math.ceil((pendingWhiteRequest.expiresAt - Date.now()) / 1000));
+            if (remain <= 0) {
+                // 超时
+                clearWhiteRequestTimer();
+                pendingWhiteRequest = null;
+                hideWhiteRequestDialog();
+                const btn = document.getElementById('btnRequestWhite');
+                if (btn) btn.disabled = false;
+                log('执白申请超时，已取消', 'warn');
+            }
+        }, 250);
+    }
+
+    function clearWhiteRequestTimer() {
+        if (whiteRequestTimer) { clearInterval(whiteRequestTimer); whiteRequestTimer = null; }
+    }
+
+    function showWhiteRequestDialog() {
+        const overlay = document.getElementById('undoOverlay');
+        const modal = document.getElementById('undoModal');
+        if (!overlay || !modal) return;
+        modal.innerHTML = `
+            <h3>🎲 对手申请执白</h3>
+            <p>对手希望与您互换执白方</p>
+            <p>是否同意？接受后双方将重新开局</p>
+            <div class="undo-countdown" id="whiteRequestCountdown">倒计时：30 秒</div>
+            <div class="undo-modal-buttons">
+                <button class="undo-btn undo-btn-accept" onclick="acceptWhiteRequest()">✓ 同意</button>
+                <button class="undo-btn undo-btn-decline" onclick="declineWhiteRequest()">✗ 拒绝</button>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+        // 倒计时刷新
+        if (whiteRequestTimer) clearInterval(whiteRequestTimer);
+        whiteRequestTimer = setInterval(() => {
+            if (!pendingWhiteRequest) { clearWhiteRequestTimer(); return; }
+            const remain = Math.max(0, Math.ceil((pendingWhiteRequest.expiresAt - Date.now()) / 1000));
+            const cdEl = document.getElementById('whiteRequestCountdown');
+            if (cdEl) cdEl.textContent = '倒计时：' + remain + ' 秒';
+            if (remain <= 0) {
+                clearWhiteRequestTimer();
+                pendingWhiteRequest = null;
+                hideWhiteRequestDialog();
+                log('执白申请超时，已取消', 'warn');
+            }
+        }, 250);
+    }
+
+    function hideWhiteRequestDialog() {
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        clearWhiteRequestTimer();
+    }
+
+    function acceptWhiteRequest() {
+        if (!pendingWhiteRequest || pendingWhiteRequest.side !== 'responder') return;
+        const reqId = pendingWhiteRequest.requestId;
+        clearWhiteRequestTimer();
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        pendingWhiteRequest = null;
+        // 房主自己变黑，并重新开局
+        myColor = BLACK;
+        newGameLocal();
+        updatePlayerInfo();
+        renderAll();
+        sendMessage({ type: 'accept-white', requestId: reqId });
+        log('✅ 已同意执白互换（你执黑）');
+    }
+
+    function declineWhiteRequest() {
+        if (!pendingWhiteRequest || pendingWhiteRequest.side !== 'responder') return;
+        const reqId = pendingWhiteRequest.requestId;
+        clearWhiteRequestTimer();
+        const overlay = document.getElementById('undoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        pendingWhiteRequest = null;
+        sendMessage({ type: 'decline-white', requestId: reqId });
+        log('已拒绝执白申请');
+    }
+
+    function checkUrlForRoom() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomCode = urlParams.get('room');
+        if (roomCode) {
+            document.getElementById('roomCodeInput').value = roomCode.toUpperCase();
+            switchTab('join');
+        }
+    }
+
+    // 全局暴露
+    window.newGame = newGame;
+    window.undoMove = undoMove;
+    window.toggleUltimateMode = toggleUltimateMode;
+    window.toggleRules = toggleRules;
+    window.switchTab = switchTab;
+    window.createRoom = createRoom;
+    window.joinRoom = joinRoom;
+    window.copyRoomCode = copyRoomCode;
+    window.disconnectGame = disconnectGame;
+    window.selectServer = selectServer;
+    window.toggleCustomServer = toggleCustomServer;
+    window.toggleLog = toggleLog;
+    window.goToMove = goToMove;
+    window.goPrevMove = goPrevMove;
+    window.goNextMove = goNextMove;
+    window.goToLatest = goToLatest;
+    window.copyPgn = copyPgn;
+    window.togglePgnExport = togglePgnExport;
+    window.acceptUndo = acceptUndo;
+    window.declineUndo = declineUndo;
+    window.cancelUndo = cancelUndo;
+    window.dismissUndoInfo = dismissUndoInfo;
+    window.requestWhite = requestWhite;
+    window.acceptWhiteRequest = acceptWhiteRequest;
+    window.declineWhiteRequest = declineWhiteRequest;
+    window.sendChat = sendChat;
+
+    // 启动
+    loadServerPrefs();
+    applyServerUI();
+    newGameLocal();
+    checkUrlForRoom();
+    updateConnStatus('offline', '未连接');
+
+    // 页面卸载时清理
+    window.addEventListener('beforeunload', () => {
+        destroyPeer();
+    });
+})();
+</script>
+</body>
+</html>
